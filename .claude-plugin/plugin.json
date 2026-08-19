@@ -1,6 +1,6 @@
 {
   "name": "skills-utils",
-  "description": "Small agent-facing utilities. Currently: teleport, which loads another repository's always-on context without a session being spawned inside it.",
+  "description": "Small agent-facing utilities. Currently: peek, which loads another repository's always-on context without a session being spawned inside it.",
   "author": {
     "name": "luutuankiet",
     "url": "https://github.com/luutuankiet"
@@ -8,6 +8,6 @@
   "homepage": "https://github.com/luutuankiet/skills-utils",
   "repository": "https://github.com/luutuankiet/skills-utils",
   "skills": [
-    "./skills/teleport"
+    "./skills/peek"
   ]
 }

@@ -2,14 +2,14 @@
 
 Small agent-facing utilities, published as one Claude Code plugin.
 
-## teleport
+## peek
 
 An agent session preloads the context of exactly one directory: the one it was
 spawned in. Every other repository on the disk is opaque to it. Asking about one
 costs a directory listing, then several speculative reads, before the agent even
 knows whether the answer is there.
 
-`teleport` prints what that repository's own Level 0 would have been:
+`peek` prints what that repository's own Level 0 would have been:
 
 - the contract file — `CLAUDE.md` and `AGENTS.md` — with `@` imports resolved
   in place and deduplicated, because on a real repository `CLAUDE.md` is often
@@ -24,7 +24,7 @@ worth reading. That is the whole point of a progressive ladder — this utility
 prints rung zero and lets the caller decide whether to climb.
 
 ```bash
-skills/teleport/bin/teleport.sh ~/dev/some-repo ~/dev/another/deep/file.ts
+skills/peek/bin/peek.sh ~/dev/some-repo ~/dev/another/deep/file.ts
 ```
 
 **The path can be wrong and still work.** A file three levels down resolves to
@@ -42,4 +42,4 @@ it can save a few tokens has already lost.
 ## Install
 
 Available through the `context-lab` marketplace. The skill then resolves as
-`skills-utils:teleport`.
+`skills-utils:peek`.

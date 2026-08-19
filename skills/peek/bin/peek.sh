@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# teleport.sh -- another repository's Level 0, from outside it.
+# peek.sh -- another repository's Level 0, from outside it.
 #
-#   teleport.sh <path> [<path> ...]
+#   peek.sh <path> [<path> ...]
 #
 # A session only ever preloads the context of the directory it was spawned in.
 # When it has to reason about a repository next door, it otherwise pays for a
@@ -33,7 +33,7 @@ usage() { sed -n '3,5p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; }
 
 case "${1-}" in
   -h|--help) usage; exit 0 ;;
-  "")        echo "teleport: no path given" >&2; usage >&2; exit 2 ;;
+  "")        echo "peek: no path given" >&2; usage >&2; exit 2 ;;
 esac
 
 # ------------------------------------------------------------- resolution ---

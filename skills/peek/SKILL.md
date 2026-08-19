@@ -1,16 +1,16 @@
 ---
-name: teleport
+name: peek
 description: Load another repository's always-on context — its CLAUDE.md/AGENTS.md and skill list — as if the session had started inside it. Use before reading, exploring or reasoning about files in a repository other than the current working directory.
 ---
 
-# Teleport
+# Peek
 
 A session only preloads the context of the directory it was spawned in. Reaching
 into a repository next door otherwise costs a listing plus several speculative
 reads before you know what is there.
 
 ```bash
-<this skill's base directory>/bin/teleport.sh <path> [<path> ...]
+<this skill's base directory>/bin/peek.sh <path> [<path> ...]
 ```
 
 A path may be a **file** as easily as a directory, and it may be any depth inside
