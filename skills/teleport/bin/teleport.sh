@@ -22,6 +22,10 @@
 set -uo pipefail
 
 MAXDEPTH_SKILLS=4     # context-lab nests at skills/<bucket>/<skill>/SKILL.md
+# Vendored and build directories, in one place. A second copy of this list is a
+# second chance to forget one, and a vendored SKILL.md printed as if the repo
+# shipped it is a silent wrong answer, not a visible failure.
+IGNORE_DIRS="node_modules .git .venv venv target dist build __pycache__ .next .tox"
 CONTRACTS="CLAUDE.md AGENTS.md"
 IMPORT_DEPTH=2
 
@@ -72,9 +76,9 @@ suggest_children() {
   for child in "$dir"/*/; do
     [ -d "$child" ] || continue
     base="$(basename -- "$child")"
-    case "$base" in
-      node_modules|.venv|venv|.git|target|dist|build|__pycache__|.next) continue ;;
-    esac
+    skip=0
+    for ign in $IGNORE_DIRS; do [ "$base" = "$ign" ] && { skip=1; break; }; done
+    [ "$skip" -eq 1 ] && continue
     for c in $CONTRACTS; do
       [ -f "$child$c" ] && { printf '  %s\n' "${child%/}"; break; }
     done
@@ -129,7 +133,8 @@ emit_file() {
 # name and description only. The body is the level the caller has not decided
 # to pay for yet, and deciding is the entire point of a progressive ladder.
 emit_skills() {
-  local root="$1" roots=() f n=0
+  local root="$1" roots=() prune=() f n=0 ign
+  for ign in $IGNORE_DIRS; do prune+=(-name "$ign" -prune -o); done
   [ -d "$root/.claude/skills" ] && roots+=("$root/.claude/skills")
   [ -d "$root/skills" ]         && roots+=("$root/skills")
   [ ${#roots[@]} -eq 0 ] && return 0
@@ -150,11 +155,16 @@ emit_skills() {
       fm && $0 == "---" { exit }
       fm && /^name:/ { name = unq(substr($0, index($0, ":") + 1)) }
       fm && /^description:/ { desc = unq(substr($0, index($0, ":") + 1)) }
-      END { if (name != "") printf "  %s\n      %s\n", name, (desc == "" ? "(no description)" : desc) }
-    ' "$f"
+      # A skill needs both keys or no harness can match it, so one without
+      # them would not be loaded inside that repo either. Skipping is the
+      # honest simulation; printing it would advertise context that can never
+      # actually fire.
+      END {
+        if (name != "" && desc != "") printf "  %s\n      %s\n", name, desc
+      }' "$f"
     n=$((n + 1))
-  done < <(find "${roots[@]}" -maxdepth "$MAXDEPTH_SKILLS" -name SKILL.md \
-             -not -path '*/node_modules/*' -not -path '*/.git/*' 2>/dev/null | LC_ALL=C sort)
+  done < <(find "${roots[@]}" -maxdepth "$MAXDEPTH_SKILLS" "${prune[@]}" \
+             -name SKILL.md -print 2>/dev/null | LC_ALL=C sort)
   return 0
 }
 
@@ -178,7 +188,7 @@ for arg in "$@"; do
 
   if [ "$rc" -eq 2 ]; then
     printf 'NO REPOSITORY  %s\n' "$start"
-    printf '  No contract file and no git boundary between here and %s.\n' "$HOME"
+    printf '  No contract file and no git boundary anywhere above this path.\n' 
     kids="$(suggest_children "$start")"
     [ -n "$kids" ] && { printf '  Directories below this one that do have one:\n%s\n' "$kids"; }
     printf '\n'
