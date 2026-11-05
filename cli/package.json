@@ -1,0 +1,42 @@
+{
+  "name": "@luutuankiet/peek",
+  "version": "0.1.0",
+  "description": "Print another repository's always-on agent context (CLAUDE.md/AGENTS.md with imports resolved, plus its skill list) from a local path, an SSH host, or a git URL",
+  "keywords": [
+    "claude",
+    "agents",
+    "claude-code",
+    "agents-md",
+    "skills"
+  ],
+  "license": "MIT",
+  "author": "luutuankiet",
+  "homepage": "https://github.com/luutuankiet/skills-utils#readme",
+  "bugs": "https://github.com/luutuankiet/skills-utils/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luutuankiet/skills-utils.git",
+    "directory": "cli"
+  },
+  "type": "module",
+  "bin": {
+    "peek": "bin/peek.js"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

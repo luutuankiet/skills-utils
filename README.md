@@ -24,7 +24,7 @@ worth reading. That is the whole point of a progressive ladder — this utility
 prints rung zero and lets the caller decide whether to climb.
 
 ```bash
-skills/peek/bin/peek.sh ~/dev/some-repo ~/dev/another/deep/file.ts
+npx -y @luutuankiet/peek ~/dev/some-repo ~/dev/another/deep/file.ts
 ```
 
 **The path can be wrong and still work.** A file three levels down resolves to
@@ -36,10 +36,18 @@ of billing you twice for context you already have.
 Exit `0` when a Level 0 was found *or* confidently absent — absence is an answer,
 not a failure. `2` on a bad argument, `3` when no given path exists at all.
 
-Dependency-free bash and awk, on purpose. A utility that needs installing before
-it can save a few tokens has already lost.
+The peeking itself is dependency-free bash and awk (`cli/lib/peek.sh`), on
+purpose: it is the one piece that may have to run on a host with nothing else
+installed. The npm package is a thin Node entry point in front of it.
 
 ## Install
 
-Available through the `context-lab` marketplace. The skill then resolves as
-`skills-utils:peek`.
+The skill is available through the `context-lab` marketplace and resolves as
+`skills-utils:peek`. It calls the npm package `@luutuankiet/peek`, so the host
+needs `node` and `bash`; there is nothing else to install.
+
+## Releasing
+
+Bump `cli/package.json`, then push a matching `vX.Y.Z` tag.
+`.github/workflows/release.yml` tests and publishes it to npm through trusted
+publishing, without a token.

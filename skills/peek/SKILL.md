@@ -10,7 +10,7 @@ into a repository next door otherwise costs a listing plus several speculative
 reads before you know what is there.
 
 ```bash
-<this skill's base directory>/bin/peek.sh <path> [<path> ...]
+npx -y @luutuankiet/peek@latest <path> [<path> ...]
 ```
 
 A path may be a **file** as easily as a directory, and it may be any depth inside
@@ -19,3 +19,6 @@ Pass several paths at once rather than calling repeatedly.
 
 Read the output, then decide what to open. Relative links in it resolve against
 `ROOT:`, never against your working directory.
+
+The host needs `node` and `bash`. If `npx` itself is missing, say so rather than
+reconstructing the output by hand: a guessed Level 0 is worse than none.
