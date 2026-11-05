@@ -21,7 +21,8 @@ Write a string argument as one of these, and nothing else in the string:
 | `"@@file:/x"` | the literal text `@file:/x` (one `@` removed) |
 | `"@@file64:/x"` | the literal text `@file64:/x` |
 
-- Pointers work at any depth: inside arrays and nested objects.
+- Pointers work at any depth: inside arrays and nested objects, including as
+  the values of a map argument.
 - The pointer must be the whole string; `"see @file:/x"` is sent as written.
 - Relative paths resolve against the session's working folder; `~/` is your
   home folder. Prefer absolute paths.
@@ -32,6 +33,33 @@ Write a string argument as one of these, and nothing else in the string:
 ```json
 { "script": "@file:/home/me/work/deck-script.js", "deck": "1AbC..." }
 ```
+
+### Example: diagrams into a Google Doc
+
+Render the scenes locally. Per diagram, `c2m` writes `<name>.png` (for the doc)
+and `<name>.review.png` (small, for a review agent) to `~/.cache/c2m/renders/`,
+and prints the image line, the edit link line and the `images` entry to paste.
+
+```
+npx -y @luutuankiet/clipboard2markdown excalidraw --png flow.json states.json
+```
+
+Then one `edit_lines` call (same for `edit_doc` and `create_doc`) sends every
+image. Each name in `images` is referred to as `![Alt](attach:<name>)`, alone
+on its line:
+
+```json
+{
+  "doc": "1AbC...", "tab": "2", "lines": "40", "revision": "...",
+  "new": "![Request flow](attach:flow)\n[Edit this diagram](https://excalidraw.com/#json=...)\n\n![Order states](attach:states)\n[Edit this diagram](https://excalidraw.com/#json=...)",
+  "images": {
+    "flow": "@file64:/home/me/.cache/c2m/renders/flow.png",
+    "states": "@file64:/home/me/.cache/c2m/renders/states.png"
+  }
+}
+```
+
+Send the `.png`, never the `.review.png`.
 
 If you are about to paste more than a few thousand characters that already
 exist in a file, use a pointer instead. Over 20,000 pasted characters, mcp-piper
