@@ -98,10 +98,20 @@ mcp-piper: saved 2 files
   `<folder>/<uri>`, subfolders created, so a tool that returns several files
   lands them as files. Text resources are written as text, binary ones as their
   bytes. Resources with any other `uri` (`https://...`) go into `result.txt`
-  as before. The stub lists every file written.
-- A resource path that is absolute, has a `..` segment, resolves outside the
-  folder or names a symlink is refused: nothing is written and you see the full
-  result with a reason starting `mcp-piper: refused to save the resource`.
+  as before. Only resources from the server you called are placed this way;
+  a line that merely looks like another server's resource stays in
+  `result.txt`. The stub lists every file written.
+- The whole save is checked before the first file is written. It is refused
+  when a resource path is absolute, has a `..` segment or a NUL byte, resolves
+  outside the folder or names a symlink; when an existing file sits where a
+  folder is needed or the folder cannot be written; when two parts land on one
+  path (two resources with the same `uri`, or a resource named `result.txt` or
+  `img1.png`); or when one resource is `a` and another `a/b`. Nothing is
+  written and you see the full result with a reason starting
+  `mcp-piper: refused`.
+- A file Claude Code saved from the result (an image's original bytes, a binary
+  resource) is copied only from Claude Code's own tool-results folder for the
+  session. A result naming any other local path is saved as the text it is.
 - Text blocks go into the `_save_to` file, joined by newlines.
 - A JSON result (`structuredContent`) is pretty-printed into the `_save_to` file.
 - Each image goes to its own file beside it: `<stem>-img1.png`, `<stem>-img2.jpg`,

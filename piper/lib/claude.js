@@ -7,6 +7,7 @@ import {
   PiperError, NUDGE_TEXT, hasPointerCandidates, needsInlineNudge, prepareInput,
   normaliseResult, saveResult, buildStub, writeState, readState, deleteState, humanSize,
 } from './core.js';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 
 // ---------------------------------------------------------------- settings ---
 // Three behaviours, each settled by nested Claude Code runs (version 2.1.318).
@@ -71,6 +72,33 @@ export function isErrorResult(resp) {
   if (!resp || typeof resp !== 'object') return false;
   if (Array.isArray(resp)) return resp.some((b) => b && typeof b === 'object' && (b.isError === true || b.is_error === true));
   return resp.isError === true || resp.is_error === true;
+}
+
+/**
+ * Claude Code's tool-results folders for this session: it keeps the
+ * transcript at <projects>/<session>.jsonl and the files it saves from tool
+ * results (image originals, binary resources) in <projects>/<session>/tool-results/.
+ * Only a file in there may be copied into a save; a result naming any other
+ * path is text.
+ */
+export function toolResultsFolders(ev) {
+  const tp = ev && typeof ev.transcript_path === 'string' && isAbsolute(ev.transcript_path) ? ev.transcript_path : null;
+  if (!tp) return [];
+  const ids = new Set([basename(tp, '.jsonl')]);
+  if (typeof ev.session_id === 'string' && /^[A-Za-z0-9_-]+$/.test(ev.session_id)) ids.add(ev.session_id);
+  return [...ids].map((id) => join(dirname(tp), id, 'tool-results'));
+}
+
+// Claude Code names an MCP tool mcp__<server>__<tool>, with every character
+// of the server name other than letters, digits, _ and - turned into _.
+const normaliseName = (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, '_');
+
+/** Which "[Resource from <name> at ...]" headers belong to the called server. */
+export function serverMatcher(ev) {
+  const name = ev && ev.mcp_server && typeof ev.mcp_server.name === 'string' ? ev.mcp_server.name : null;
+  if (name) return (s) => s === name || normaliseName(s) === normaliseName(name);
+  const tool = ev && typeof ev.tool_name === 'string' ? ev.tool_name : '';
+  return (s) => tool.startsWith(`mcp__${normaliseName(s)}__`);
 }
 
 function describe(prep) {
@@ -148,7 +176,7 @@ export function post(ev, options = {}) {
     }
     let saved;
     try {
-      saved = saveResult(normaliseResult(resp), state.saveTo);
+      saved = saveResult(normaliseResult(resp), state.saveTo, { trusted: toolResultsFolders(ev), server: serverMatcher(ev) });
     } catch (err) {
       // Better the agent reads the result than loses it. A PiperError (a
       // refused resource path) already says what happened and what to do.

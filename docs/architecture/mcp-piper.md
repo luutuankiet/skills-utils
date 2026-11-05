@@ -41,20 +41,27 @@ here and re-date the page.
 | `piper/bin/mcp-piper.js` | 28-58 | `runHook`: stdin parse, dispatch, and the rule that an internal error denies the call only when it involved a pointer or `_save_to` |
 | `piper/bin/mcp-piper.js` | 60-133 | `doctor`: checks the node version, looks for `hooks/hooks.json` next to the package, dry-runs a pointer through `pre`, and checks the state folder is writable |
 | `piper/lib/claude.js` | 11-48 | the three behaviour settings (`DECISION_WHEN_CHANGED`, `NUDGE_ROUTE`, `SAVE_ERROR_RESULTS`) with the reason for each default, and the session note text |
-| `piper/lib/claude.js` | 90-134 | `pre` handler, including the fast path for calls with nothing to do |
-| `piper/lib/claude.js` | 136-196 | `post`, `failure`, `sessionStart`, `subagentStart`, and the `HANDLERS` table |
+| `piper/lib/claude.js` | 76-102 | `toolResultsFolders` (the only folders a result may name a file in, from `transcript_path`) and `serverMatcher` (whose resource headers place files, from `mcp_server.name` or the tool name) |
+| `piper/lib/claude.js` | 118-162 | `pre` handler, including the fast path for calls with nothing to do |
+| `piper/lib/claude.js` | 164-224 | `post` (passes the two above to `saveResult`), `failure`, `sessionStart`, `subagentStart`, and the `HANDLERS` table |
 | `piper/lib/core.js` | 31-70 | cheap pointer scan run on every call (every new pointer prefix must be added to `looksLikePointer`), and the large-paste tip threshold |
 | `piper/lib/core.js` | 72-203 | path resolution and pointer expansion: `@file:` in `readPointer`, `@dir:` with its skip rules and the `DIR_MAX_FILES` / `DIR_MAX_BYTES` caps in `readDirPointer`, and the `@@file:` / `@@dir:` escape |
 | `piper/lib/core.js` | 205-274 | `_save_to` validation (a folder target comes back with a trailing separator) and `prepareInput` |
-| `piper/lib/core.js` | 276-345 | result normalising, truncation detection, `siblingPath` (names images for a file or a folder target) |
-| `piper/lib/core.js` | 346-420 | embedded resources: how Claude Code renders them before a hook sees them, `resourcePath` (relative path or refusal), `resourceTarget` (stays inside the folder, no symlink) |
-| `piper/lib/core.js` | 421-556 | `saveResult` (text, images, audio, resources; every resource path checked before the first write) and `buildStub` |
-| `piper/lib/core.js` | 557-593 | state files under `MCP_PIPER_STATE_DIR` or the system temp folder, swept after 24 hours |
+| `piper/lib/core.js` | 276-340 | result normalising, truncation detection, `siblingPath` (names images for a file or a folder target) |
+| `piper/lib/core.js` | 342-370 | `readTrusted` and `realFolders`: a local file a result names is read only when its real path is inside a trusted folder |
+| `piper/lib/core.js` | 372-445 | embedded resources: how Claude Code renders them before a hook sees them, `resourcePath` (relative path or refusal, NUL refused), `resourceTarget` (stays inside the folder, no symlink, no file in the way, folder writable) |
+| `piper/lib/core.js` | 446-461 | `checkPlan`: refuses two parts on one path and a file where another part needs a folder |
+| `piper/lib/core.js` | 463-613 | `saveResult` (text, images, audio, resources; the whole write plan checked before the first write; `opts.trusted`, `opts.server`) |
+| `piper/lib/core.js` | 615-620 | `buildStub` |
+| `piper/lib/core.js` | 622-658 | state files under `MCP_PIPER_STATE_DIR` or the system temp folder, swept after 24 hours |
 
 `claude.js` is the only file that speaks the hook payload format. One leak:
 `saveResult` in `core.js` reads the text Claude Code puts in a result in place
-of image and resource blocks (`[Image: source: ...]`, `[Resource from ...]`). A second harness would get its own adapter next
-to it.
+of image and resource blocks (`[Image: source: ...]`, `[Resource from ...]`).
+Which folders those lines may point into and which server's headers count
+come from `claude.js` (`toolResultsFolders`, `serverMatcher`) as
+`opts.trusted` and `opts.server`. A second harness would get its own adapter
+next to it.
 
 ## Tests
 
