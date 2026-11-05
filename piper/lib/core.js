@@ -6,16 +6,19 @@
 // to these functions and turns the answers back into the harness's format.
 
 import {
-  readFileSync, writeFileSync, statSync, mkdirSync, accessSync, unlinkSync,
+  readFileSync, writeFileSync, statSync, lstatSync, mkdirSync, accessSync, unlinkSync,
   readdirSync, constants as fsc,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 
 export const NUDGE_THRESHOLD = 20000;
 export const NUDGE_TEXT = 'mcp-piper: next time pass large text as "@file:<path>" instead of pasting it';
 export const STATE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/** Caps on one `@dir:` / `@dir64:` pointer; going over denies the call. */
+export const DIR_MAX_FILES = 500;
+export const DIR_MAX_BYTES = 20 * 1024 * 1024;
 
 /** An error whose message is meant for the agent, as is. */
 export class PiperError extends Error {
@@ -29,13 +32,16 @@ export class PiperError extends Error {
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
+// Every pointer prefix must be listed here, or the call skips expansion and
+// the literal pointer reaches the server.
 const looksLikePointer = (s) =>
-  s.startsWith('@file:') || s.startsWith('@file64:') || s.startsWith('@@file');
+  s.startsWith('@file:') || s.startsWith('@file64:') || s.startsWith('@@file')
+  || s.startsWith('@dir:') || s.startsWith('@dir64:') || s.startsWith('@@dir');
 
 /**
  * Cheap test run on every tool call: does any string value, at any depth,
- * start with `@file:`, `@file64:` or `@@file`? Stops at the first hit and
- * allocates nothing.
+ * start with a pointer prefix (`@file:`, `@file64:`, `@dir:`, `@dir64:`) or
+ * an escape (`@@file`, `@@dir`)? Stops at the first hit and allocates nothing.
  */
 export function hasPointerCandidates(value) {
   if (typeof value === 'string') return looksLikePointer(value);
@@ -74,26 +80,30 @@ export function resolvePath(p, cwd = process.cwd(), home = homedir()) {
 
 // ------------------------------------------------------- pointer expansion ---
 
-const POINTER = /^@file(64)?:([\s\S]*)$/;
-const ESCAPE = /^@@file(64)?:/;
+const POINTER = /^@(file|dir)(64)?:([\s\S]*)$/;
+const ESCAPE = /^@@(file|dir)(64)?:/;
 
-function readPointer(raw, isBase64, rawPath, cwd, home) {
+function statPointer(raw, rawPath, cwd, home) {
   if (rawPath === '') {
-    throw new PiperError(`mcp-piper: "${raw}" has no path. Write "@file:<path>" with the path right after the colon.`);
+    throw new PiperError(`mcp-piper: "${raw}" has no path. Write the path right after the colon, e.g. "@file:/abs/path".`);
   }
   const abs = resolvePath(rawPath, cwd, home);
-  const literal = `write "@${raw}" instead to send the text literally`;
-  let st;
   try {
-    st = statSync(abs);
+    return { abs, st: statSync(abs) };
   } catch (err) {
+    const literal = `write "@${raw}" instead to send the text literally`;
     if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
-      throw new PiperError(`mcp-piper: file not found: ${abs} (from "${raw}"). Fix the path, or ${literal}.`);
+      throw new PiperError(`mcp-piper: ${raw.startsWith('@dir') ? 'folder' : 'file'} not found: ${abs} (from "${raw}"). Fix the path, or ${literal}.`);
     }
     throw new PiperError(`mcp-piper: cannot read ${abs} (from "${raw}"): ${err.code || err.message}. Check the path and its permissions, or ${literal}.`);
   }
+}
+
+function readPointer(raw, isBase64, rawPath, cwd, home) {
+  const { abs, st } = statPointer(raw, rawPath, cwd, home);
+  const literal = `write "@${raw}" instead to send the text literally`;
   if (st.isDirectory()) {
-    throw new PiperError(`mcp-piper: ${abs} is a folder (from "${raw}"). Pointers take a single file; folders are not supported yet. Point at one file, or pack the folder into one first.`);
+    throw new PiperError(`mcp-piper: ${abs} is a folder (from "${raw}"). "@file:" takes a single file; to send a folder as a {"relative/path": contents} map, write "@dir${isBase64 ? '64' : ''}:${rawPath}".`);
   }
   let buf;
   try {
@@ -105,11 +115,62 @@ function readPointer(raw, isBase64, rawPath, cwd, home) {
 }
 
 /**
+ * Read a folder into `{ "rel/path": contents }`, keys sorted. Recurses;
+ * skips names starting with "." (so `.git`, `.env`), symlinks and anything
+ * that is not a plain file or folder. Throws PiperError over the caps.
+ */
+function readDirPointer(raw, isBase64, rawPath, cwd, home) {
+  const { abs, st } = statPointer(raw, rawPath, cwd, home);
+  if (!st.isDirectory()) {
+    throw new PiperError(`mcp-piper: ${abs} is a file, not a folder (from "${raw}"). Write "@file${isBase64 ? '64' : ''}:${rawPath}" to send one file.`);
+  }
+  const files = [];
+  let bytes = 0;
+  let skipped = 0;
+  const over = (what) => new PiperError(`mcp-piper: ${abs} (from "${raw}") holds more than ${what}, the limit for one "@dir:" pointer. Point at a smaller folder.`);
+  const walk = (dir, rel) => {
+    let names;
+    try {
+      names = readdirSync(dir).sort();
+    } catch (err) {
+      throw new PiperError(`mcp-piper: cannot list ${dir} (from "${raw}"): ${err.code || err.message}. Check its permissions.`);
+    }
+    for (const name of names) {
+      if (name.startsWith('.')) { skipped++; continue; }
+      const p = join(dir, name);
+      const r = rel ? `${rel}/${name}` : name;
+      let ls;
+      try { ls = lstatSync(p); } catch { skipped++; continue; }
+      if (ls.isDirectory()) { walk(p, r); continue; }
+      if (!ls.isFile()) { skipped++; continue; }
+      if (files.length >= DIR_MAX_FILES) throw over(`${DIR_MAX_FILES} files`);
+      bytes += ls.size;
+      if (bytes > DIR_MAX_BYTES) throw over(humanSize(DIR_MAX_BYTES));
+      files.push({ p, r });
+    }
+  };
+  walk(abs, '');
+  const map = {};
+  for (const { p, r } of files) {
+    let buf;
+    try {
+      buf = readFileSync(p);
+    } catch (err) {
+      throw new PiperError(`mcp-piper: cannot read ${p} (from "${raw}"): ${err.code || err.message}. Check the file's permissions.`);
+    }
+    map[r] = isBase64 ? buf.toString('base64') : buf.toString('utf8');
+  }
+  return { abs, bytes, files: files.length, skipped, map };
+}
+
+/**
  * Expand every pointer and escape, depth first, in arrays and objects.
  * Returns a new value; the input is not modified. Object keys are never
  * touched, only values. Throws PiperError with a message for the agent.
  *
- * @returns {{ value: any, pointers: {abs: string, bytes: number, base64: boolean}[], escapes: number }}
+ * A `@file:` pointer becomes a string; a `@dir:` pointer becomes an object.
+ *
+ * @returns {{ value: any, pointers: {abs: string, bytes: number, base64: boolean, files?: number, skipped?: number}[], escapes: number }}
  */
 export function expandPointers(value, { cwd = process.cwd(), home = homedir() } = {}) {
   const pointers = [];
@@ -120,8 +181,14 @@ export function expandPointers(value, { cwd = process.cwd(), home = homedir() } 
       if (ESCAPE.test(v)) { escapes++; return v.slice(1); }
       const m = POINTER.exec(v);
       if (!m) return v;
-      const r = readPointer(v, Boolean(m[1]), m[2], cwd, home);
-      pointers.push({ abs: r.abs, bytes: r.bytes, base64: Boolean(m[1]) });
+      const base64 = Boolean(m[2]);
+      if (m[1] === 'dir') {
+        const r = readDirPointer(v, base64, m[3], cwd, home);
+        pointers.push({ abs: r.abs, bytes: r.bytes, base64, files: r.files, skipped: r.skipped });
+        return r.map;
+      }
+      const r = readPointer(v, base64, m[3], cwd, home);
+      pointers.push({ abs: r.abs, bytes: r.bytes, base64 });
       return r.text;
     }
     if (Array.isArray(v)) return v.map(walk);
@@ -138,8 +205,10 @@ export function expandPointers(value, { cwd = process.cwd(), home = homedir() } 
 // ---------------------------------------------------------------- _save_to ---
 
 /**
- * Check a `_save_to` value, create its parent folder and confirm it is
- * writable. Returns the absolute path. Throws PiperError.
+ * Check a `_save_to` value, create its folder and confirm it is writable.
+ * Returns the absolute path. A value ending in "/" or naming an existing
+ * folder is a folder target: it comes back with a trailing separator, and
+ * saveResult writes `result.txt`, `img1.png`, ... inside it. Throws PiperError.
  */
 export function validateSaveTo(v, { cwd = process.cwd(), home = homedir() } = {}) {
   if (typeof v !== 'string') {
@@ -151,8 +220,17 @@ export function validateSaveTo(v, { cwd = process.cwd(), home = homedir() } = {}
   const abs = resolvePath(v, cwd, home);
   let st = null;
   try { st = statSync(abs); } catch { /* not there yet, which is normal */ }
-  if (st && st.isDirectory()) {
-    throw new PiperError(`mcp-piper: _save_to ${abs} is a folder. Give a file path inside it instead, e.g. ${join(abs, 'out.txt')}; saving into a folder is not supported yet.`);
+  if (v.endsWith('/') || (st && st.isDirectory())) {
+    if (st && !st.isDirectory()) {
+      throw new PiperError(`mcp-piper: _save_to ${v} ends in "/" but ${abs} is a file. Drop the "/" to overwrite the file, or choose a folder path.`);
+    }
+    try {
+      mkdirSync(abs, { recursive: true });
+      accessSync(abs, fsc.W_OK);
+    } catch (err) {
+      throw new PiperError(`mcp-piper: cannot write to the folder ${abs} for _save_to: ${err.code || err.message}. Choose a path you can write to.`);
+    }
+    return abs + sep;
   }
   const parent = dirname(abs);
   try {
@@ -248,24 +326,34 @@ export function truncationWarning(t) {
     : 'warning: mcpproxy cut this result short before it arrived and kept no cache, so the saved file is partial and the rest is lost. Set mcpproxy\'s tool_response_limit to 0 and call again.';
 }
 
-/** `<dir>/<stem>-img<N><ext>` next to the save path. */
+/**
+ * Where image or audio N goes: `<dir>/<stem>-img<N><ext>` next to a file
+ * target, `<folder>/img<N><ext>` inside a folder target.
+ */
 export function siblingPath(saveTo, label, n, ext) {
+  if (isFolderTarget(saveTo)) return join(saveTo, `${label}${n}${ext}`);
   const stem = basename(saveTo, extname(saveTo));
   return join(dirname(saveTo), `${stem}-${label}${n}${ext}`);
 }
+
+/** A save path from validateSaveTo that ends in a separator is a folder. */
+export const isFolderTarget = (saveTo) => saveTo.endsWith(sep) || saveTo.endsWith('/');
 
 function readSource(p) {
   try { return readFileSync(p); } catch { return null; }
 }
 
 /**
- * Save a normalised result to `saveTo` (absolute). Text goes to `saveTo`,
- * each image to `<stem>-img<N>.<ext>` beside it. Links are never followed:
+ * Save a normalised result to `target` (absolute). Text goes to `target`,
+ * each image to `<stem>-img<N>.<ext>` beside it. A folder target (trailing
+ * separator) gets `result.txt` (or `result.json`) and `img<N>.<ext>` inside it. Links are never followed:
  * a `[Resource link: ...]` line is saved as the text it is.
  *
  * @returns {{ files: {path: string, bytes: number, sha: string, kind: string}[], warnings: string[] }}
  */
-export function saveResult(result, saveTo) {
+export function saveResult(result, target) {
+  const folder = isFolderTarget(target);
+  const saveTo = folder ? join(target, result.kind === 'json' ? 'result.json' : 'result.txt') : target;
   mkdirSync(dirname(saveTo), { recursive: true });
   const files = [];
   const warnings = [];
@@ -333,13 +421,13 @@ export function saveResult(result, saveTo) {
       warnings.push(`warning: image ${i + 1} pointed at ${sources[i]}, which could not be read, and had no data to fall back on; it was not saved.`);
       continue;
     }
-    write(siblingPath(saveTo, 'img', i + 1, ext), buf, mime);
+    write(siblingPath(target, 'img', i + 1, ext), buf, mime);
   }
   audio.forEach((b, i) => {
     const mime = b.mimeType || 'application/octet-stream';
     const sub = mime.split('/')[1];
     const ext = sub && /^[a-z0-9]+$/.test(sub) ? `.${sub}` : '.bin';
-    write(siblingPath(saveTo, 'audio', i + 1, ext), Buffer.from(b.data ?? '', 'base64'), mime);
+    write(siblingPath(target, 'audio', i + 1, ext), Buffer.from(b.data ?? '', 'base64'), mime);
   });
   return { files, warnings };
 }

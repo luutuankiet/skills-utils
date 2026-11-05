@@ -45,7 +45,7 @@ const DEFAULTS = {
   saveErrors: SAVE_ERROR_RESULTS,
 };
 
-export const MEMORY_NOTE = 'mcp-piper is active for MCP tools. To send a file on disk as a tool argument, write the argument as "@file:<abs path>" (text) or "@file64:<abs path>" (base64); the file is read for you and never enters your context. To save a tool\'s result to disk instead of reading it, add "_save_to": "<abs path>" to the call; you get back a short stub with the path. Both are optional per call. Details: the mcp-piper skill.';
+export const MEMORY_NOTE = 'mcp-piper is active for MCP tools. To send a file on disk as a tool argument, write the argument as "@file:<abs path>" (text) or "@file64:<abs path>" (base64); "@dir:<abs path>" / "@dir64:<abs path>" send a folder as a {"relative/path": contents} map. The bytes are read for you and never enter your context. To save a tool\'s result to disk instead of reading it, add "_save_to": "<abs path>" to the call (end it in "/" to save into a folder); you get back a short stub with the paths. Never write or read base64 yourself when a pointer or _save_to can carry it. Details: the mcp-piper skill.';
 
 // ------------------------------------------------------------------ helpers ---
 
@@ -75,7 +75,11 @@ export function isErrorResult(resp) {
 
 function describe(prep) {
   const parts = [];
-  for (const p of prep.pointers) parts.push(`${p.base64 ? 'base64' : 'text'} ${humanSize(p.bytes)} from ${p.abs}`);
+  for (const p of prep.pointers) {
+    parts.push(p.files === undefined
+      ? `${p.base64 ? 'base64' : 'text'} ${humanSize(p.bytes)} from ${p.abs}`
+      : `folder of ${p.files} file${p.files === 1 ? '' : 's'} (${p.base64 ? 'base64' : 'text'}, ${humanSize(p.bytes)}) from ${p.abs}`);
+  }
   if (prep.escapes) parts.push(`${prep.escapes} escaped "@@file" value${prep.escapes === 1 ? '' : 's'} sent literally`);
   if (prep.saveTo) parts.push(`result will be saved to ${prep.saveTo}`);
   return `mcp-piper: ${parts.join('; ')}`;

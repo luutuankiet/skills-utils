@@ -18,8 +18,11 @@ Write a string argument as one of these, and nothing else in the string:
 |---|---|
 | `"@file:/abs/path/notes.md"` | the file's text (UTF-8) |
 | `"@file64:/abs/path/chart.png"` | the file's bytes as base64 |
+| `"@dir:/abs/path/src"` | a JSON object `{"rel/path.txt": "<text>", ...}` of the folder |
+| `"@dir64:/abs/path/assets"` | the same object with base64 values |
 | `"@@file:/x"` | the literal text `@file:/x` (one `@` removed) |
 | `"@@file64:/x"` | the literal text `@file64:/x` |
+| `"@@dir:/x"` | the literal text `@dir:/x` |
 
 - Pointers work at any depth: inside arrays and nested objects, including as
   the values of a map argument.
@@ -29,6 +32,15 @@ Write a string argument as one of these, and nothing else in the string:
 - No size limit on mcp-piper's side. A server that rejects the size answers
   with its own error.
 - Use `@file64:` only when the tool wants base64 (images, binary uploads).
+- `@dir:` recurses into subfolders. It skips names starting with `.` (so
+  `.git`, `.env`) and symlinks, sorts the keys, and stops at 500 files or 20 MB
+  in total. Use it only where the tool takes an object of files. A folder of
+  images goes as `@dir64:`.
+- **Never write or read base64 yourself.** When a tool takes an image or other
+  base64 argument, pass `@file64:`. When it returns one, use `_save_to`. The
+  bytes stay out of your context, so send the full-quality file. To look at
+  an image yourself, ask the server for its smallest preview, or `Read` a saved
+  file.
 
 ```json
 { "script": "@file:/home/me/work/deck-script.js", "deck": "1AbC..." }
@@ -77,6 +89,10 @@ mcp-piper: saved 2 files
 - /home/me/work/outline-img1.png (183.9 KB, sha256 f5760ae9a1b2c3d4, image/png)
 ```
 
+- End the path in `/` (or name an existing folder) to save **into a folder**:
+  the text goes to `result.txt` (`result.json` for a JSON result) and images
+  to `img1.png`, `img2.jpg` and so on inside it. A path without `/` that does
+  not exist yet is a file.
 - Text blocks go into the `_save_to` file, joined by newlines.
 - A JSON result (`structuredContent`) is pretty-printed into the `_save_to` file.
 - Each image goes to its own file beside it: `<stem>-img1.png`, `<stem>-img2.jpg`,
@@ -100,10 +116,13 @@ A refused call never reaches the server. The reason starts with `mcp-piper:`.
 |---|---|
 | `file not found` | fix the path; check the working folder for relative paths |
 | `cannot read` | the file's permissions block you; pick a readable file |
-| `is a folder` (pointer) | point at one file; pack a folder into one file first |
+| `is a folder` (pointer) | use `@dir:` / `@dir64:` if the tool takes a map of files, else point at one file |
+| `is a file, not a folder` | use `@file:` / `@file64:` for one file |
+| `holds more than` | the `@dir:` folder is over 500 files or 20 MB; point at a smaller one |
 | `has no path` | write the path right after the colon |
 | `_save_to must be a file path string` | pass a string, not an object or array |
-| `_save_to is empty` / `is a folder` | give a full file path, e.g. `/tmp/out.json` |
+| `_save_to is empty` | give a full path, e.g. `/tmp/out.json` or `/tmp/out/` |
+| `ends in "/" but ... is a file` | drop the `/`, or choose a folder path |
 | `cannot create the folder` / `cannot write to` | choose a location you can write to |
 
 If you meant the literal text `@file:...`, write `@@file:...` instead.

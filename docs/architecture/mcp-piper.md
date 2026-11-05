@@ -1,16 +1,18 @@
 ---
 title: mcp-piper
 covers: where mcp-piper expands @file pointers, handles _save_to, saves a tool result and builds the stub, carries state between the pre and post hooks, wires the Claude Code hooks, and runs doctor or the nested lab tests
-verified: 2026-11-05
+verified: 2026-11-06
 ---
 
 # mcp-piper
 
 mcp-piper is a set of Claude Code hooks on every MCP tool (`mcp__.*`). Before a
 call, a string argument written as `"@file:<path>"` or `"@file64:<path>"` is
-replaced by the file's contents. After a call that carried a top-level
-`"_save_to": "<path>"`, the result is written to disk and the agent gets a short
-stub instead. It ships inside this plugin (hooks in `hooks/hooks.json`, skill in
+replaced by the file's contents, and `"@dir:<path>"` / `"@dir64:<path>"` by an
+object mapping each relative path in the folder to its contents. After a call
+that carried a top-level `"_save_to": "<path>"`, the result is written to disk
+(into a folder when the path ends in `/`) and the agent gets a short stub
+instead. It ships inside this plugin (hooks in `hooks/hooks.json`, skill in
 `skills/mcp-piper/SKILL.md`) and as the npm package `@luutuankiet/mcp-piper`
 from `piper/`.
 
@@ -38,13 +40,13 @@ here and re-date the page.
 | `piper/bin/mcp-piper.js` | 28-58 | `runHook`: stdin parse, dispatch, and the rule that an internal error denies the call only when it involved a pointer or `_save_to` |
 | `piper/bin/mcp-piper.js` | 60-133 | `doctor`: checks the node version, looks for `hooks/hooks.json` next to the package, dry-runs a pointer through `pre`, and checks the state folder is writable |
 | `piper/lib/claude.js` | 11-48 | the three behaviour settings (`DECISION_WHEN_CHANGED`, `NUDGE_ROUTE`, `SAVE_ERROR_RESULTS`) with the reason for each default, and the session note text |
-| `piper/lib/claude.js` | 86-130 | `pre` handler, including the fast path for calls with nothing to do |
-| `piper/lib/claude.js` | 132-189 | `post`, `failure`, `sessionStart`, `subagentStart`, and the `HANDLERS` table |
-| `piper/lib/core.js` | 28-65 | cheap pointer scan run on every call, and the large-paste tip threshold |
-| `piper/lib/core.js` | 66-137 | path resolution and pointer expansion, including the `@@file:` escape |
-| `piper/lib/core.js` | 138-197 | `_save_to` validation and `prepareInput` |
-| `piper/lib/core.js` | 198-354 | result normalising, truncation detection, saving text and images, `buildStub` |
-| `piper/lib/core.js` | 355-391 | state files under `MCP_PIPER_STATE_DIR` or the system temp folder, swept after 24 hours |
+| `piper/lib/claude.js` | 90-134 | `pre` handler, including the fast path for calls with nothing to do |
+| `piper/lib/claude.js` | 136-193 | `post`, `failure`, `sessionStart`, `subagentStart`, and the `HANDLERS` table |
+| `piper/lib/core.js` | 31-70 | cheap pointer scan run on every call (every new pointer prefix must be added to `looksLikePointer`), and the large-paste tip threshold |
+| `piper/lib/core.js` | 72-203 | path resolution and pointer expansion: `@file:` in `readPointer`, `@dir:` with its skip rules and the `DIR_MAX_FILES` / `DIR_MAX_BYTES` caps in `readDirPointer`, and the `@@file:` / `@@dir:` escape |
+| `piper/lib/core.js` | 205-274 | `_save_to` validation (a folder target comes back with a trailing separator) and `prepareInput` |
+| `piper/lib/core.js` | 276-442 | result normalising, truncation detection, saving text and images (`siblingPath` names them for a file or a folder target), `buildStub` |
+| `piper/lib/core.js` | 443-479 | state files under `MCP_PIPER_STATE_DIR` or the system temp folder, swept after 24 hours |
 
 `core.js` knows nothing about Claude Code; `claude.js` is the only file that
 speaks the hook payload format. A second harness would get its own adapter next
@@ -62,6 +64,6 @@ to it.
 
 ## The rule
 
-A hook must never break the call it watches, and a literal `@file:` must never
+A hook must never break the call it watches, and a literal `@file:` or `@dir:` must never
 reach a server. When the two pull apart, deny the call with a reason starting
 `mcp-piper:`; otherwise pass it through untouched.

@@ -103,6 +103,29 @@ const CASES = {
     return { prompt: one('mcp__lab__echo', { text: `@file:${join(d, 'adir')}` }), checks: [
       ['result says folder', 'result', 'is a folder', true], ['server not called', noServerCall]] };
   },
+  'ptr-dir': (d) => {
+    const src = join(d, 'src');
+    mkdirSync(join(src, 'sub'), { recursive: true });
+    payloadFile(src, 'a.txt', 'DIR_one');
+    payloadFile(join(src, 'sub'), 'b.txt', 'DIR_two');
+    payloadFile(src, '.hidden', 'DIR_hidden');
+    return { prompt: one('mcp__lab__echo', { files: `@dir:${src}` }), checks: [
+      ['use holds pointer', 'use', `@dir:${src}`, true], ['use lacks bytes', 'use', 'PAYLOAD_DIR_one', false],
+      ['server got both files', 'server', 'PAYLOAD_DIR_two', true], ['server got relpath key', 'server', '"sub/b.txt"', true],
+      ['dotfile skipped', 'server', 'PAYLOAD_DIR_hidden', false], ['result is echo', 'result', 'LAB_ECHO_OK', true]] };
+  },
+  'save-folder': (d) => {
+    const o = join(d, 'out', 'shots') + '/';
+    const img = join(d, 'out', 'shots', 'img1.png');
+    return { prompt: one('mcp__lab__image', { _save_to: o }), checks: [
+      ['result is stub', 'result', `- ${img}`, true], ['result lists caption file', 'result', 'result.txt', true],
+      ['result has no image block', 'resultRaw', '"type":"image"', false],
+      ['image file is the original bytes', (c) => {
+        const sent = c.server.find((r) => r.tool === 'image')?.sent;
+        const got = existsSync(img) ? sha16(readFileSync(img)) : null;
+        return [Boolean(sent) && sent === got, `server sent ${sent}, ${img} sha ${got}`];
+      }]] };
+  },
   'deny-saveto-type': () => ({ prompt: one('mcp__lab__text_n', { _save_to: 42 }), checks: [
     ['result says must be string', 'result', 'mcp-piper: _save_to must be a file path string', true], ['server not called', noServerCall]] }),
   'deny-saveto-blocked': (d) => {

@@ -2,16 +2,16 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, chmodSync,
-  utimesSync, readdirSync,
+  utimesSync, readdirSync, symlinkSync, statSync,
 } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
   PiperError, hasPointerCandidates, needsInlineNudge, resolvePath, expandPointers,
   validateSaveTo, prepareInput, normaliseResult, saveResult, buildStub, humanSize,
   detectTruncation, siblingPath, stateDir, writeState, readState, deleteState, sweepState,
-  NUDGE_THRESHOLD,
+  NUDGE_THRESHOLD, DIR_MAX_FILES, DIR_MAX_BYTES,
 } from '../lib/core.js';
 
 const fresh = (p = 'piper-core-') => mkdtempSync(join(tmpdir(), p));
@@ -85,10 +85,81 @@ test('deny: pointer to a missing file names the path and the escape', () => {
     && e.message.includes('@@file:'));
 });
 
-test('deny: pointer to a folder is refused', () => {
+test('deny: @file pointer to a folder is refused and names @dir', () => {
   const d = fresh();
   assert.throws(() => expandPointers({ a: '@file64:' + d }), (e) =>
-    e instanceof PiperError && /is a folder/.test(e.message) && /not supported yet/.test(e.message));
+    e instanceof PiperError && /is a folder/.test(e.message) && e.message.includes(`"@dir64:${d}"`));
+});
+
+// -------------------------------------------------------------- @dir pointer ---
+
+const tree = () => {
+  const d = fresh();
+  mkdirSync(join(d, 'sub/deeper'), { recursive: true });
+  mkdirSync(join(d, '.git'));
+  writeFileSync(join(d, 'b.txt'), 'B');
+  writeFileSync(join(d, 'a.txt'), 'A');
+  writeFileSync(join(d, 'sub/c.bin'), Buffer.from([0, 1, 2]));
+  writeFileSync(join(d, 'sub/deeper/d.md'), '# D');
+  writeFileSync(join(d, '.env'), 'SECRET=1');
+  writeFileSync(join(d, '.git/HEAD'), 'ref');
+  symlinkSync('/etc/hostname', join(d, 'link'));
+  symlinkSync(join(d, 'sub'), join(d, 'sublink'));
+  return d;
+};
+
+test('@dir: folder becomes a sorted {relpath: text} map; dotfiles and symlinks skipped', () => {
+  const d = tree();
+  assert.equal(hasPointerCandidates({ x: '@dir:' + d }), true);
+  assert.equal(hasPointerCandidates({ x: '@dir64:' + d }), true);
+  const { value, pointers } = expandPointers({ x: { files: '@dir:' + d } });
+  assert.deepEqual(Object.keys(value.x.files), ['a.txt', 'b.txt', 'sub/c.bin', 'sub/deeper/d.md']);
+  assert.equal(value.x.files['sub/deeper/d.md'], '# D');
+  assert.equal(pointers.length, 1);
+  assert.equal(pointers[0].files, 4);
+  assert.equal(pointers[0].bytes, 1 + 1 + 3 + 3);
+  assert.equal(pointers[0].skipped, 4, '.env, .git, link, sublink');
+});
+
+test('@dir64: values are base64', () => {
+  const d = tree();
+  const { value } = expandPointers({ x: '@dir64:' + d });
+  assert.equal(value.x['sub/c.bin'], Buffer.from([0, 1, 2]).toString('base64'));
+  assert.equal(value.x['a.txt'], 'QQ==');
+});
+
+test('@dir: relative path, ~, empty folder and escape', () => {
+  const d = fresh();
+  mkdirSync(join(d, 'empty'));
+  assert.deepEqual(expandPointers({ x: '@dir:empty' }, { cwd: d }).value, { x: {} });
+  assert.deepEqual(expandPointers({ x: '@dir:~/empty' }, { home: d }).value, { x: {} });
+  const esc = expandPointers({ x: '@@dir:empty' }, { cwd: d });
+  assert.deepEqual(esc.value, { x: '@dir:empty' });
+  assert.equal(esc.escapes, 1);
+});
+
+test('deny: @dir on a file, a missing folder, or no path', () => {
+  const d = fresh();
+  writeFileSync(join(d, 'a.txt'), 'A');
+  assert.throws(() => expandPointers({ x: '@dir:a.txt' }, { cwd: d }), (e) =>
+    e instanceof PiperError && /is a file, not a folder/.test(e.message) && e.message.includes('"@file:a.txt"'));
+  assert.throws(() => expandPointers({ x: '@dir:nope' }, { cwd: d }), (e) =>
+    e instanceof PiperError && e.message.startsWith('mcp-piper: folder not found: ' + join(d, 'nope')));
+  assert.throws(() => expandPointers({ x: '@dir:' }), /has no path/);
+});
+
+test('deny: @dir over the file-count cap', () => {
+  const d = fresh();
+  for (let i = 0; i <= DIR_MAX_FILES; i++) writeFileSync(join(d, `f${i}`), '');
+  assert.throws(() => expandPointers({ x: '@dir:' + d }), (e) =>
+    e instanceof PiperError && e.message.includes(`more than ${DIR_MAX_FILES} files`));
+});
+
+test('deny: @dir over the byte cap', () => {
+  const d = fresh();
+  writeFileSync(join(d, 'big'), Buffer.alloc(DIR_MAX_BYTES + 1));
+  assert.throws(() => expandPointers({ x: '@dir:' + d }), (e) =>
+    e instanceof PiperError && /more than 20\.0 MB/.test(e.message));
 });
 
 test('deny: pointer to an unreadable file', { skip: isRoot && 'root can read anything' }, () => {
@@ -145,9 +216,42 @@ test('deny: _save_to whose parent is not writable', { skip: isRoot && 'root can 
     e instanceof PiperError && /cannot write to/.test(e.message));
 });
 
-test('deny: _save_to that is an existing folder', () => {
+test('_save_to: an existing folder, or a path ending in "/", is a folder target', () => {
   const d = fresh();
-  assert.throws(() => validateSaveTo(d), /is a folder/);
+  assert.equal(validateSaveTo(d), d + sep);
+  assert.equal(validateSaveTo('new/out/', { cwd: d }), join(d, 'new/out') + sep);
+  assert.ok(statSync(join(d, 'new/out')).isDirectory(), 'created');
+  assert.equal(validateSaveTo('new/file', { cwd: d }), join(d, 'new/file'), 'no slash, not there: a file');
+});
+
+test('deny: _save_to ending in "/" that is an existing file', () => {
+  const d = fresh();
+  writeFileSync(join(d, 'f'), 'x');
+  assert.throws(() => validateSaveTo('f/', { cwd: d }), (e) =>
+    e instanceof PiperError && /ends in "\/" but .* is a file/.test(e.message));
+});
+
+test('saveResult into a folder: result.txt plus img<N>, stub lists them', () => {
+  const d = fresh();
+  const target = validateSaveTo('out/', { cwd: d });
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  const saved = saveResult(normaliseResult([
+    { type: 'text', text: 'hello' },
+    { type: 'image', mimeType: 'image/png', data: png.toString('base64') },
+    { type: 'image', mimeType: 'image/jpeg', data: png.toString('base64') },
+  ]), target);
+  assert.deepEqual(saved.files.map((f) => f.path), [
+    join(d, 'out/result.txt'), join(d, 'out/img1.png'), join(d, 'out/img2.jpg')]);
+  assert.equal(readFileSync(join(d, 'out/result.txt'), 'utf8'), 'hello');
+  assert.deepEqual(readFileSync(join(d, 'out/img1.png')), png);
+  assert.match(buildStub(saved), /^mcp-piper: saved 3 files\n- .*out\/result\.txt/);
+});
+
+test('saveResult into a folder: a JSON result lands in result.json', () => {
+  const d = fresh();
+  const target = validateSaveTo(d);
+  const saved = saveResult(normaliseResult('{"a":1}'), target);
+  assert.deepEqual(saved.files.map((f) => f.path), [join(d, 'result.json')]);
 });
 
 test('prepareInput strips _save_to and reports what changed', () => {

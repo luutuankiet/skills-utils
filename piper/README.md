@@ -29,13 +29,16 @@ Write a string argument as exactly one of these:
 |---|---|
 | `"@file:/abs/path/script.js"` | the file's contents as UTF-8 text |
 | `"@file64:/abs/path/image.png"` | the file's contents as base64 |
-| `"@@file:/some/text"` | the literal string `@file:/some/text` (one `@` removed) |
+| `"@dir:/abs/path/src"` | the folder as a JSON object `{"rel/path": "<text>", ...}` |
+| `"@dir64:/abs/path/assets"` | the same object with base64 values |
+| `"@@file:/some/text"` | the literal string `@file:/some/text` (one `@` removed; `@@dir:` likewise) |
 | `"@@file64:/some/text"` | the literal string `@file64:/some/text` |
 
 - The pointer must be the whole string. `"see @file:/x"` is left alone.
 - Pointers work at any depth inside arrays and objects.
 - Relative paths resolve against the session's working folder, and `~/` expands to your home folder.
-- There is no size limit. If the server rejects a large payload, its error reaches the agent as usual.
+- There is no size limit for `@file:`. If the server rejects a large payload, its error reaches the agent as usual.
+- `@dir:` recurses, sorts keys, skips names starting with `.` and symlinks, and refuses a folder over 500 files or 20 MB in total.
 
 Example:
 
@@ -45,7 +48,7 @@ Example:
 
 ## Keep a result: `_save_to`
 
-Add a top-level `_save_to` argument with a file path:
+Add a top-level `_save_to` argument with a file path, or a folder path ending in `/`:
 
 ```json
 { "doc": "1AbC...", "_save_to": "/home/me/work/outline.json" }
@@ -63,6 +66,7 @@ What gets saved:
 
 - **Text** blocks are joined with newlines into the `_save_to` file.
 - **JSON** results (an MCP `structuredContent`) are pretty-printed into the `_save_to` file.
+- **Into a folder** (`_save_to` ends in `/`, or names an existing folder): text goes to `result.txt` (`result.json` for JSON) and images to `img<N>.<ext>` inside it.
 - **Images** each go to their own file next to it, named `<stem>-img<N>.<ext>`, numbered from 1. Where Claude Code kept the server's original image bytes, those are copied; otherwise the image is decoded from the result.
 - **Links are never followed.** A resource link arrives as a text line and is saved as text. To fetch the linked file, use the server's own tool or `curl`.
 - If an MCP proxy cut the result short (`[truncated by mcpproxy`), the stub says so and gives the proxy's cache key when there is one.
@@ -72,10 +76,22 @@ What gets saved:
 
 mcp-piper stops a call before the server sees it, with a reason starting `mcp-piper:`, when:
 
-- a pointer names a file that does not exist, cannot be read, or is a folder (folders are not supported yet);
-- `_save_to` is not a string, is empty, is an existing folder, or its folder cannot be created or written to.
+- a pointer names something that does not exist or cannot be read, `@file:` names a folder, or `@dir:` names a file;
+- a `@dir:` folder is over 500 files or 20 MB;
+- `_save_to` is not a string, is empty, ends in `/` but names a file, or its folder cannot be created or written to.
 
 The reason says what to fix. An unexpanded `@file:` string never reaches a server.
+
+## For MCP server authors
+
+Nothing in a server has to change. If an argument takes base64 bytes or a map of files, saying so in its description lets an agent with mcp-piper send a pointer instead of producing the bytes itself. One sentence is enough:
+
+```
+image_base64: PNG, JPEG or GIF bytes as base64. With mcp-piper, pass "@file64:/abs/path.png".
+files: {"relative/path": text}. With mcp-piper, pass "@dir:/abs/folder".
+```
+
+When a tool returns base64 or images, add a line such as `With mcp-piper, add "_save_to": "/abs/path/" to save it to disk instead of reading it.` There is no schema flag. The sentence is the whole convention.
 
 ## The paste tip
 
