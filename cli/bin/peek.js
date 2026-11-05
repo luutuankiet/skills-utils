@@ -70,7 +70,8 @@ function peekGit({ cloneUrl, ref, subdir }) {
   const target = subdir ? join(clone.repo, subdir) : clone.repo;
   const status = runBash([target]);
   const minutes = Math.round(ttlMs() / 60000);
-  console.log(`  ${clone.reused ? 'Reused the cached clone' : 'Cloned'} ${scrub(cloneUrl)}${ref ? ` at ${ref}` : ''}.`);
+  const via = clone.url && clone.url !== cloneUrl ? ` (https was refused, so over ssh as ${clone.url})` : '';
+  console.log(`  ${clone.reused ? 'Reused the cached clone of' : 'Cloned'} ${scrub(cloneUrl)}${ref ? ` at ${ref}` : ''}${via}.`);
   console.log(`  It is a shallow copy kept ${minutes} minutes after its last peek, then deleted.\n`);
   return status;
 }

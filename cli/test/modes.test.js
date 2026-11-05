@@ -8,7 +8,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { detect, parseGitUrl, scrub, cacheKey, sweep, MARKER } from '../lib/modes.js';
+import { detect, parseGitUrl, scrub, cacheKey, sweep, sshForm, MARKER } from '../lib/modes.js';
 
 const bin = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'peek.js');
 const run = (args, env = {}, cwd = tmpdir()) =>
@@ -44,6 +44,28 @@ test('tokens in URLs never reach output or cache folder names', () => {
   assert.equal(scrub('https://user:pw@host/x'), 'https://***@host/x');
   assert.doesNotMatch(cacheKey('https://ghp_SECRET@github.com/o/r.git', null), /SECRET/);
   assert.equal(cacheKey('git@github.com:o/r.git', 'dev'), cacheKey('https://github.com/o/r', 'dev'));
+});
+
+test('an https URL has an ssh form to fall back to', () => {
+  assert.equal(sshForm('https://github.com/o/r'), 'git@github.com:o/r.git');
+  assert.equal(sshForm('https://ghp_X@github.com/o/r.git'), 'git@github.com:o/r.git');
+  assert.equal(sshForm('git@github.com:o/r.git'), null);
+  assert.equal(sshForm('file:///tmp/r'), null);
+});
+
+test('a skill description written as a YAML block is read, not printed as ">"', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'peek-yaml-'));
+  try {
+    mkdirSync(join(repo, '.git'));
+    writeFileSync(join(repo, 'AGENTS.md'), '# x\n');
+    mkdirSync(join(repo, 'skills', 'folded'), { recursive: true });
+    writeFileSync(join(repo, 'skills', 'folded', 'SKILL.md'),
+      '---\nname: folded\ndescription: >\n  First line\n  second line.\nuser-invocable: true\n---\n');
+    const res = run([repo]);
+    assert.match(res.stdout, /folded\n\s+First line second line\.\n/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 // ----------------------------------------------------------------- sweep ---

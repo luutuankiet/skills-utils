@@ -158,9 +158,13 @@ emit_skills() {
         return s
       }
       NR == 1 && $0 == "---" { fm = 1; next }
-      fm && $0 == "---" { exit }
-      fm && /^name:/ { name = unq(substr($0, index($0, ":") + 1)) }
-      fm && /^description:/ { desc = unq(substr($0, index($0, ":") + 1)) }
+      fm && $0 == "---" { if (block == "name") name = blk; else if (block == "desc") desc = blk; exit }
+      # A YAML block scalar (description: > or |, optionally with - or +)
+      # carries its value on the indented lines that follow; join them.
+      fm && block != "" && /^[ \t]/ { v = trim($0); if (v != "") blk = (blk == "" ? v : blk " " v); next }
+      fm && block != "" { if (block == "name") name = blk; else desc = blk; block = "" }
+      fm && /^name:/ { v = trim(substr($0, index($0, ":") + 1)); if (v ~ /^[>|][-+]?$/) { block = "name"; blk = "" } else name = unq(v) }
+      fm && /^description:/ { v = trim(substr($0, index($0, ":") + 1)); if (v ~ /^[>|][-+]?$/) { block = "desc"; blk = "" } else desc = unq(v) }
       # A skill needs both keys or no harness can match it, so one without
       # them would not be loaded inside that repo either. Skipping is the
       # honest simulation; printing it would advertise context that can never

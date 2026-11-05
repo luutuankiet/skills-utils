@@ -109,19 +109,20 @@ export function ensureClone(cloneUrl, ref, { dir = cacheDir(), git = 'git' } = {
   mkdirSync(staging, { recursive: true });
   closeSync(openSync(join(staging, MARKER), 'w'));
 
-  const args = ['clone', '--quiet', '--depth', '1', '--filter=blob:none', '--single-branch', '--no-tags'];
-  if (ref) args.push('--branch', ref);
-  args.push('--', cloneUrl, join(staging, 'repo'));
-
-  const res = spawnSync(git, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-  });
-  if (res.error || res.status !== 0) {
+  // A private repo over https fails on any host without a credential helper,
+  // while the same host often has an ssh key GitHub accepts. So https falls
+  // back to its ssh form before giving up, and both reasons are reported.
+  const errors = [];
+  let usedUrl = null;
+  for (const url of [cloneUrl, sshForm(cloneUrl)].filter(Boolean)) {
+    const why = gitClone(git, url, ref, join(staging, 'repo'));
+    if (why === null) { usedUrl = url; break; }
+    errors.push(`${scrub(url)}: ${why}`);
+    rmSync(join(staging, 'repo'), { recursive: true, force: true });
+  }
+  if (usedUrl === null) {
     rmSync(staging, { recursive: true, force: true });
-    const why = res.error ? res.error.message : (res.stderr || '').trim();
-    throw new Error(scrub(why || `git exited ${res.status}`));
+    throw new Error(errors.join('\n'));
   }
 
   rmSync(entry, { recursive: true, force: true });
@@ -132,7 +133,34 @@ export function ensureClone(cloneUrl, ref, { dir = cacheDir(), git = 'git' } = {
     rmSync(staging, { recursive: true, force: true });
     if (!existsSync(repo)) throw new Error('clone vanished while being cached');
   }
-  return { repo, reused: false };
+  return { repo, reused: false, url: usedUrl };
+}
+
+// The ssh spelling of an https URL, or null when there is none to try.
+export function sshForm(url) {
+  const m = /^https?:\/\/(?:[^@/]+@)?([^/]+)\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url);
+  return m ? `git@${m[1]}:${m[2]}/${m[3]}.git` : null;
+}
+
+// Run one clone. Returns null on success, else git's reason, scrubbed.
+function gitClone(git, url, ref, into) {
+  const args = ['clone', '--quiet', '--depth', '1', '--filter=blob:none', '--single-branch', '--no-tags'];
+  if (ref) args.push('--branch', ref);
+  args.push('--', url, into);
+  const res = spawnSync(git, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'ignore', 'pipe'],
+    // Never stop to ask for a password or a host-key confirmation: an agent
+    // has no one to type it, and a hung clone looks like a slow one.
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -o BatchMode=yes',
+    },
+  });
+  if (!res.error && res.status === 0) return null;
+  const why = res.error ? res.error.message : (res.stderr || '').trim();
+  return scrub(why || `git exited ${res.status}`);
 }
 
 // Quote one word for a POSIX shell on the far side of ssh.
