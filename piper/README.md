@@ -1,9 +1,99 @@
 # mcp-piper
 
-Pipe large files between local disk and MCP tool calls without the bytes passing through the agent's context.
+Move files between your disk and MCP tool calls without the bytes passing through the agent's context.
 
-mcp-piper will ship as a Claude Code hook: when a tool call needs to send or receive a large file, the hook moves the bytes between disk and the MCP server directly, so the agent only ever sees a path.
+An agent using MCP tools in Claude Code normally has two expensive habits:
 
-**0.0.1 is a placeholder.** It reserves the npm name and only prints its version. The hook ships in 0.1.0.
+- to send a file it already has on disk, it pastes the whole file into the tool call;
+- to keep a large or binary result, it reads the whole result first.
 
-Part of `skills-utils`: https://github.com/luutuankiet/skills-utils
+mcp-piper is a pair of Claude Code hooks that remove both. The agent writes a short pointer instead of the file, and gets a short stub back instead of the result. It works with any MCP server, including claude.ai connectors, and needs no change to any server.
+
+Both directions are opt-in, per call. A call with no pointer and no `_save_to` behaves exactly as it did before.
+
+## Install
+
+mcp-piper ships inside the `skills-utils` Claude Code plugin, which registers the hooks for you:
+
+```
+claude plugin install skills-utils@context-lab
+```
+
+The hooks run `node .../piper/bin/mcp-piper.js hook <event>` from the plugin folder. Node 18 or newer is the only requirement. You do not need to edit `~/.claude/settings.json`.
+
+## Send a file: pointers
+
+Write a string argument as exactly one of these:
+
+| you write | the server receives |
+|---|---|
+| `"@file:/abs/path/script.js"` | the file's contents as UTF-8 text |
+| `"@file64:/abs/path/image.png"` | the file's contents as base64 |
+| `"@@file:/some/text"` | the literal string `@file:/some/text` (one `@` removed) |
+| `"@@file64:/some/text"` | the literal string `@file64:/some/text` |
+
+- The pointer must be the whole string. `"see @file:/x"` is left alone.
+- Pointers work at any depth inside arrays and objects.
+- Relative paths resolve against the session's working folder, and `~/` expands to your home folder.
+- There is no size limit. If the server rejects a large payload, its error reaches the agent as usual.
+
+Example:
+
+```json
+{ "script": "@file:/home/me/work/deck-script.js", "deck": "1AbC..." }
+```
+
+## Keep a result: `_save_to`
+
+Add a top-level `_save_to` argument with a file path:
+
+```json
+{ "doc": "1AbC...", "_save_to": "/home/me/work/outline.json" }
+```
+
+mcp-piper removes `_save_to` before the server sees the call, saves the result there, and the agent receives a stub instead of the result:
+
+```
+mcp-piper: saved 2 files
+- /home/me/work/outline.json (300.0 KB, sha256 ad7c7bed782c7790, text)
+- /home/me/work/outline-img1.png (183.9 KB, sha256 f5760ae9a1b2c3d4, image/png)
+```
+
+What gets saved:
+
+- **Text** blocks are joined with newlines into the `_save_to` file.
+- **JSON** results (an MCP `structuredContent`) are pretty-printed into the `_save_to` file.
+- **Images** each go to their own file next to it, named `<stem>-img<N>.<ext>`, numbered from 1. Where Claude Code kept the server's original image bytes, those are copied; otherwise the image is decoded from the result.
+- **Links are never followed.** A resource link arrives as a text line and is saved as text. To fetch the linked file, use the server's own tool or `curl`.
+- If an MCP proxy cut the result short (`[truncated by mcpproxy`), the stub says so and gives the proxy's cache key when there is one.
+- If the tool returns an error, nothing is saved and the agent sees the error as usual.
+
+## When a call is stopped
+
+mcp-piper stops a call before the server sees it, with a reason starting `mcp-piper:`, when:
+
+- a pointer names a file that does not exist, cannot be read, or is a folder (folders are not supported yet);
+- `_save_to` is not a string, is empty, is an existing folder, or its folder cannot be created or written to.
+
+The reason says what to fix. An unexpanded `@file:` string never reaches a server.
+
+## The paste tip
+
+When a call has no pointer but pastes a string longer than 20,000 characters, the call goes through unchanged and the agent gets a one-line tip to use `@file:` next time.
+
+## Things to know
+
+- Claude Code writes hook output into the session's transcript file on disk. That includes the expanded contents of every pointer, so a secret sent through a pointer lands in that file too. The model never sees it.
+- mcp-piper keeps a small state file per call in your temp folder (`mcp-piper/state`), deleted when the call finishes; leftovers older than a day are cleaned up automatically.
+
+## Check an install
+
+```
+npx @luutuankiet/mcp-piper doctor
+```
+
+checks the Node version, that the plugin's hook file is where Claude Code looks for it, that a sample pointer expands correctly, and that the state folder is writable.
+
+## License
+
+MIT. Part of `skills-utils`: https://github.com/luutuankiet/skills-utils
