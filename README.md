@@ -61,14 +61,46 @@ The peeking itself is dependency-free bash and awk (`cli/lib/peek.sh`), on
 purpose: it is the one piece that may have to run on a host with nothing else
 installed. The npm package is a thin Node entry point in front of it.
 
+## mcp-piper
+
+An agent using MCP tools pays twice for files. To send a file it already has on
+disk, it pastes the whole file into the tool call. To keep a large or binary
+result, it reads the whole result first. Both put bytes into the context that
+the agent never needed to see.
+
+mcp-piper is a pair of Claude Code hooks on every MCP tool (`mcp__.*`) that
+removes both, for any server, claude.ai connectors included, with no change to
+the server:
+
+- **Upload.** A string argument written as `"@file:<path>"` (UTF-8 text) or
+  `"@file64:<path>"` (base64) is replaced by the file's contents before the
+  server sees the call, at any depth in the arguments. `@@file:` sends the
+  literal text with one `@` removed.
+- **Download.** A top-level `"_save_to": "<path>"` is removed before the server
+  sees the call; the result is saved to that path (images to files beside it)
+  and the agent gets a short stub with paths, sizes and hashes instead.
+
+Both are opt-in per call; a call with neither runs untouched. A pointer to a
+missing file, a folder or an unreadable file, and a `_save_to` that cannot be
+written, stop the call with a reason starting `mcp-piper:`. Links in a result
+are never followed. A session and every subagent get a four-line note telling
+the model the two moves exist; the `mcp-piper` skill has the details.
+
+The hooks live in `hooks/hooks.json` and run `piper/bin/mcp-piper.js` from the
+plugin folder, so the host needs only `node` 18 or newer. The same code is
+published as `@luutuankiet/mcp-piper`; `npx @luutuankiet/mcp-piper doctor`
+checks an install. See `piper/README.md`.
+
 ## Install
 
 The skill is available through the `context-lab` marketplace and resolves as
 `skills-utils:peek`. It calls the npm package `@luutuankiet/peek`, so the host
-needs `node` and `bash`; there is nothing else to install.
+needs `node` and `bash`; there is nothing else to install. Installing the plugin
+also registers the mcp-piper hooks and the `skills-utils:mcp-piper` skill.
 
 ## Releasing
 
-Bump `cli/package.json`, then push a matching `vX.Y.Z` tag.
-`.github/workflows/release.yml` tests and publishes it to npm through trusted
-publishing, without a token.
+Bump `cli/package.json`, then push a matching `vX.Y.Z` tag. For mcp-piper, bump
+`piper/package.json` and push a matching `piper-vX.Y.Z` tag.
+`.github/workflows/release.yml` tests and publishes the matching package to npm
+through trusted publishing, without a token.
