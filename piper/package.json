@@ -1,0 +1,37 @@
+{
+  "name": "@luutuankiet/mcp-piper",
+  "version": "0.0.1",
+  "description": "Pipe large files between local disk and MCP tool calls without the bytes passing through the agent's context",
+  "keywords": [
+    "mcp",
+    "claude-code",
+    "hooks",
+    "agents"
+  ],
+  "license": "MIT",
+  "author": "luutuankiet",
+  "homepage": "https://github.com/luutuankiet/skills-utils#readme",
+  "bugs": "https://github.com/luutuankiet/skills-utils/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luutuankiet/skills-utils.git",
+    "directory": "piper"
+  },
+  "type": "module",
+  "bin": {
+    "mcp-piper": "bin/mcp-piper.js"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
