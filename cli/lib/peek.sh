@@ -178,6 +178,122 @@ emit_skills() {
   return 0
 }
 
+# ---------------------------------------------- no agent context: explore ---
+#
+# A repo with no contract and no skills would otherwise print one line saying
+# so, and the agent's next three calls would be ls, cat README, ls src. Those
+# answers are printed here instead, capped, so the first peek is never wasted.
+
+README_LINES=80
+MANIFEST_LINES=25
+TREE_LINES=40
+TREE_KIDS=6
+MANIFESTS="package.json pyproject.toml requirements.txt Cargo.toml go.mod Gemfile composer.json pom.xml build.gradle Makefile"
+
+# Names that may hold key material are never listed, even by name: a tree is
+# the one place an untracked .env would otherwise reach the caller.
+SENSITIVE_AWK='{ n = split($0, p, "/"); b = p[n] }
+  b ~ /^\.env/ || b ~ /\.(pem|key|p12|pfx|jks|keystore)$/ || b ~ /^id_(rsa|dsa|ecdsa|ed25519)/ \
+    || tolower(b) ~ /secret|credential|token/ { next }
+  { print }'
+
+# Every file under the root, relative to it, sorted. Tracked files when git can
+# say which they are; otherwise a find that skips dot-entries and vendored dirs.
+is_git_root() {
+  command -v git >/dev/null 2>&1 \
+    && [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" = "$1" ]
+}
+
+list_files() {
+  local root="$1" prune=() ign
+  if is_git_root "$root"; then
+    git -C "$root" ls-files 2>/dev/null
+  else
+    for ign in $IGNORE_DIRS; do prune+=(-name "$ign" -prune -o); done
+    ( cd -- "$root" && find . -mindepth 1 -maxdepth 6 \( -name '.*' -prune \) -o \
+        "${prune[@]}" -type f -print 2>/dev/null | sed 's|^\./||' )
+  fi | awk "$SENSITIVE_AWK" | LC_ALL=C sort
+}
+
+# Two levels of the tree: top-level dirs with file counts and their first few
+# children, then top-level files. Deeper levels are counted, never listed.
+emit_tree() {
+  awk -v cap="$TREE_LINES" -v kids="$TREE_KIDS" '
+    { n = split($0, a, "/"); total++
+      if (n == 1) { files[++nf] = a[1]; next }
+      top = a[1]
+      if (!(top in cnt)) dirs[++nd] = top
+      cnt[top]++
+      child = a[2] (n > 2 ? "/" : "")
+      key = top SUBSEP child
+      if (!(key in ccnt)) { nk[top]++; kid[top, nk[top]] = child }
+      ccnt[key]++ }
+    function out(s) { if (lines < cap) print s; else over++; lines++ }
+    END {
+      if (total == 0) { print "  (no files)"; exit }
+      for (i = 1; i <= nd; i++) {
+        d = dirs[i]; out(sprintf("  %s/  (%d file%s)", d, cnt[d], cnt[d] == 1 ? "" : "s"))
+        for (j = 1; j <= nk[d] && j <= kids; j++) {
+          c = kid[d, j]
+          if (c ~ /\/$/) out(sprintf("      %s  (%d)", c, ccnt[d SUBSEP c]))
+          else out("      " c)
+        }
+        if (nk[d] > kids) out(sprintf("      ... %d more", nk[d] - kids))
+      }
+      for (i = 1; i <= nf; i++) out("  " files[i])
+      if (over > 0) printf "  ... %d more lines; %d files in all\n", over, total
+    }'
+}
+
+# Print at most $2 lines of a file, saying how much was left out and where.
+emit_head() {
+  local f="$1" max="$2" total
+  total="$(wc -l < "$f" | tr -d ' ')"
+  sed -n "1,${max}p" "$f"
+  [ "$total" -gt "$max" ] && printf '  ... %d more lines in %s%s\n' \
+    $((total - max)) "$ROOT_PREFIX" "$f"
+  return 0
+}
+
+# Without git there is no boundary to stop at, so the nearest folder holding a
+# README or a manifest is the project; a file in src/ must not make src/ the
+# root. Nothing found below $HOME means the starting folder itself.
+find_project_root() {
+  local dir="$1" m
+  while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$dir" != "$HOME" ]; do
+    for m in README.md README $MANIFESTS; do
+      [ -f "$dir/$m" ] && { printf '%s\n' "$dir"; return 0; }
+    done
+    dir="$(dirname -- "$dir")"
+  done
+  printf '%s\n' "$1"
+}
+
+emit_explore() {
+  local root="$1" readme="" f m files
+  printf '\n  Nothing above for an agent, so here is what its first exploration\n'
+  printf '  would have fetched: the README, the manifests, and the file tree.\n'
+
+  for f in README.md readme.md README.MD Readme.md README.rst README.txt README; do
+    [ -f "$root/$f" ] && { readme="$root/$f"; break; }
+  done
+  if [ -n "$readme" ]; then
+    printf '\n──────── %s (first %d lines) ────────\n' "$(basename -- "$readme")" "$README_LINES"
+    emit_head "$readme" "$README_LINES"
+  fi
+
+  for m in $MANIFESTS; do
+    [ -f "$root/$m" ] || continue
+    printf '\n──────── %s ────────\n' "$m"
+    emit_head "$root/$m" "$MANIFEST_LINES"
+  done
+
+  TREE_SOURCE="files"; is_git_root "$root" && TREE_SOURCE="tracked files"
+  files="$(list_files "$root")"
+  printf '\n──────── tree (%s, 2 levels) ────────\n' "$TREE_SOURCE"
+  [ -n "$files" ] && printf '%s\n' "$files" | emit_tree || printf '  (no files)\n'
+}
+
 # ------------------------------------------------------------------- main ---
 
 CALLER_ROOT="$(find_root "$(pwd -P)" 2>/dev/null || true)"
@@ -202,13 +318,20 @@ for arg in "$@"; do
 
   root="$(find_root "$start")"; rc=$?
 
+  NOGIT=0
   if [ "$rc" -eq 2 ]; then
-    printf 'NO REPOSITORY  %s\n' "$ROOT_PREFIX$start"
-    printf '  No contract file and no git boundary anywhere above this path.\n' 
     kids="$(suggest_children "$start")"
-    [ -n "$kids" ] && { printf '  Directories below this one that do have one:\n%s\n' "$kids"; }
-    printf '\n'
-    continue
+    # A folder of repos (~/dev) or the home dir itself is not a project; say
+    # where the repos are. Anything else is a project that has not been
+    # git-initialised yet, and gets the same treatment as one that has.
+    if [ -n "$kids" ] || [ "$start" = "$HOME" ] || [ "$start" = "/" ]; then
+      printf 'NO REPOSITORY  %s\n' "$ROOT_PREFIX$start"
+      printf '  No contract file and no git boundary anywhere above this path.\n'
+      [ -n "$kids" ] && { printf '  Directories below this one that do have one:\n%s\n' "$kids"; }
+      printf '\n'
+      continue
+    fi
+    root="$(find_project_root "$start")"; NOGIT=1
   fi
 
   if [ -n "$CALLER_ROOT" ] && [ "$root" = "$CALLER_ROOT" ]; then
@@ -220,6 +343,7 @@ for arg in "$@"; do
 
   printf 'ROOT: %s\n' "$ROOT_PREFIX$root"
   printf '  Every relative link below resolves against that path, not your cwd.\n'
+  [ "$NOGIT" -eq 1 ] && printf '  Not a git repository and nothing above it is, so this folder is\n  taken as the project root.\n'
 
   found=0
   for c in $CONTRACTS; do
@@ -240,6 +364,13 @@ for arg in "$@"; do
   skills="$(emit_skills "$root")"
   if [ -n "$skills" ]; then
     printf '\n──────── skills ────────\n%s\n' "$skills"
+  fi
+
+  if [ "$found" -eq 0 ] && [ -z "$skills" ]; then
+    emit_explore "$root"
+    printf '\nThis repository has no agent context of its own. The rest is one Read\n'
+    printf 'away at %s.\n\n' "$ROOT_PREFIX$root"
+    continue
   fi
 
   printf '\nNot included, on purpose: skill bodies, docs/ indexes, README. Each is\n'

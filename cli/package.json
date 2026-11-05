@@ -1,6 +1,6 @@
 {
   "name": "@luutuankiet/peek",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Print another repository's always-on agent context (CLAUDE.md/AGENTS.md with imports resolved, plus its skill list) from a local path, an SSH host, or a git URL",
   "keywords": [
     "claude",

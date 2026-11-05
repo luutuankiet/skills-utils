@@ -45,6 +45,15 @@ git boundary as tie-break, and the walk never escapes the repository it was
 pointed at. Point it at the repository you are already in and it says so instead
 of billing you twice for context you already have.
 
+**A repository with no agent context still gets a first look.** With no
+contract file and no skills, the absence alone would cost the agent its next
+three calls (`ls`, the README, `ls src`), so peek prints those answers itself:
+the README's first 80 lines, each manifest's first 25, and a two-level tree of
+tracked files. A folder that is not a git repository yet is handled the same
+way, rooted at the nearest folder holding a README or a manifest. Names that may
+hold key material (`.env*`, `*.pem`, `id_rsa`, anything with secret, token or
+credential in it) are never listed.
+
 Exit `0` when a Level 0 was found *or* confidently absent — absence is an answer,
 not a failure. `2` on a bad argument, `3` when no given path exists at all.
 

@@ -33,7 +33,12 @@ Read the output, then decide what to open. Relative links in it resolve against
 - **A clone's `ROOT:`** is an ordinary local folder under `~/.cache/peek/`. Read it
   directly. It is deleted 30 minutes after its last peek, so peek the URL again
   rather than trusting an old path. Private repositories use your own git
-  credentials; a clone that fails prints `CLONE FAILED` with git's reason.
+  credentials; https falls back to ssh on its own, and a clone that fails
+  prints `CLONE FAILED` with both reasons.
+- **No agent context at all** (no contract, no skills, git or not): the output
+  carries the README's first 80 lines, the manifests and a two-level file tree
+  instead. That is your first exploration already done; don't repeat it with
+  `ls`. Files that may hold secrets (`.env*`, keys) are never listed.
 
 The host needs `node` and `bash`. If `npx` itself is missing, say so rather than
 reconstructing the output by hand: a guessed Level 0 is worse than none.

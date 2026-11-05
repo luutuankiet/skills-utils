@@ -42,3 +42,48 @@ test('a path that does not exist exits 3', () => {
   assert.equal(res.status, 3);
   assert.match(res.stdout, /NOT FOUND/);
 });
+
+function bareProject(withGit) {
+  const dir = mkdtempSync(join(tmpdir(), 'peek-bare-'));
+  if (withGit) spawnSync('git', ['init', '-q'], { cwd: dir });
+  writeFileSync(join(dir, 'README.md'), '# Bare project\nWhat it does.\n');
+  writeFileSync(join(dir, 'pyproject.toml'), '[project]\nname = "bare"\n');
+  writeFileSync(join(dir, '.env'), 'API_KEY=x\n');
+  writeFileSync(join(dir, 'server.pem'), 'x\n');
+  mkdirSync(join(dir, 'src', 'pkg'), { recursive: true });
+  writeFileSync(join(dir, 'src', 'main.py'), '');
+  writeFileSync(join(dir, 'src', 'pkg', 'a.py'), '');
+  if (withGit) spawnSync('git', ['add', '-A'], { cwd: dir });
+  return dir;
+}
+
+for (const withGit of [true, false]) {
+  test(`no agent context (${withGit ? 'git repo' : 'not a git repo'}): README, manifest and tree, never secrets`, () => {
+    const dir = bareProject(withGit);
+    try {
+      const res = run([join(dir, 'src', 'main.py')], tmpdir());
+      assert.equal(res.status, 0, res.stderr);
+      assert.match(res.stdout, new RegExp(`^ROOT: .*${dir.split('/').pop()}$`, 'm'));
+      assert.match(res.stdout, /README\.md \(first \d+ lines\)[^]*# Bare project/);
+      assert.match(res.stdout, /──── pyproject\.toml ─+\n\[project\]/);
+      assert.match(res.stdout, /src\/  \(2 files\)\n\s+main\.py\n\s+pkg\/  \(1\)/);
+      assert.doesNotMatch(res.stdout, /\.env|server\.pem|API_KEY/);
+      if (!withGit) assert.match(res.stdout, /Not a git repository/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('a folder of repos still points at the repos instead of exploring itself', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'peek-parent-'));
+  try {
+    mkdirSync(join(dir, 'child'));
+    writeFileSync(join(dir, 'child', 'AGENTS.md'), '# child\n');
+    const res = run([dir], tmpdir());
+    assert.match(res.stdout, /NO REPOSITORY[^]*child/);
+    assert.doesNotMatch(res.stdout, /tree \(/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
