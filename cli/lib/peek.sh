@@ -15,9 +15,8 @@
 # READMEs are deliberately absent -- each would multiply the cost, and each is
 # one Read away once the map below says it is worth reading.
 #
-# Dependency-free bash + awk on purpose: this runs on whatever machine the
-# plugin was installed on, and a utility that needs installing before it can
-# save a few tokens has already lost.
+# Dependency-free bash + awk on purpose: SSH mode pipes this file to a remote
+# host that may have nothing but bash, so it must never read stdin itself.
 
 set -uo pipefail
 
@@ -30,6 +29,13 @@ CONTRACTS="CLAUDE.md AGENTS.md"
 IMPORT_DEPTH=2
 
 usage() { sed -n '3,5p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; }
+
+# Prepended to every printed root. SSH mode passes "host:" so the caller reads
+# ROOT: host:/path and knows the files are not on its own disk.
+ROOT_PREFIX=""
+if [ "${1-}" = "--root-prefix" ]; then
+  ROOT_PREFIX="${2-}"; shift 2
+fi
 
 case "${1-}" in
   -h|--help) usage; exit 0 ;;
@@ -80,7 +86,7 @@ suggest_children() {
     for ign in $IGNORE_DIRS; do [ "$base" = "$ign" ] && { skip=1; break; }; done
     [ "$skip" -eq 1 ] && continue
     for c in $CONTRACTS; do
-      [ -f "$child$c" ] && { printf '  %s\n' "${child%/}"; break; }
+      [ -f "$child$c" ] && { printf '  %s\n' "$ROOT_PREFIX${child%/}"; break; }
     done
   done
 }
@@ -177,8 +183,14 @@ for arg in "$@"; do
   TOTAL=$((TOTAL + 1))
   printf '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
 
+  # A path that arrived over SSH is plain text, so no shell has expanded ~ yet.
+  case "$arg" in
+    "~")    arg="$HOME" ;;
+    "~/"*)  arg="$HOME/${arg#\~/}" ;;
+  esac
+
   start="$(realdir "$arg")" || {
-    printf 'NOT FOUND  %s\n' "$arg"
+    printf 'NOT FOUND  %s\n' "$ROOT_PREFIX$arg"
     printf '  Nothing at this path. Check the spelling before assuming the repo is bare.\n\n'
     MISSING=$((MISSING + 1))
     continue
@@ -187,7 +199,7 @@ for arg in "$@"; do
   root="$(find_root "$start")"; rc=$?
 
   if [ "$rc" -eq 2 ]; then
-    printf 'NO REPOSITORY  %s\n' "$start"
+    printf 'NO REPOSITORY  %s\n' "$ROOT_PREFIX$start"
     printf '  No contract file and no git boundary anywhere above this path.\n' 
     kids="$(suggest_children "$start")"
     [ -n "$kids" ] && { printf '  Directories below this one that do have one:\n%s\n' "$kids"; }
@@ -196,13 +208,13 @@ for arg in "$@"; do
   fi
 
   if [ -n "$CALLER_ROOT" ] && [ "$root" = "$CALLER_ROOT" ]; then
-    printf 'ALREADY LOADED  %s\n' "$root"
+    printf 'ALREADY LOADED  %s\n' "$ROOT_PREFIX$root"
     printf '  This is the repository you are already in. Its Level 0 is in your\n'
     printf '  context from the start of the session; reading it again buys nothing.\n\n'
     continue
   fi
 
-  printf 'ROOT: %s\n' "$root"
+  printf 'ROOT: %s\n' "$ROOT_PREFIX$root"
   printf '  Every relative link below resolves against that path, not your cwd.\n'
 
   found=0
@@ -227,7 +239,7 @@ for arg in "$@"; do
   fi
 
   printf '\nNot included, on purpose: skill bodies, docs/ indexes, README. Each is\n'
-  printf 'one Read away at %s, once the map above says it is worth it.\n\n' "$root"
+  printf 'one Read away at %s, once the map above says it is worth it.\n\n' "$ROOT_PREFIX$root"
 done
 
 if [ "$MISSING" -eq "$TOTAL" ]; then

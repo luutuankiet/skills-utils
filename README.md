@@ -25,7 +25,19 @@ prints rung zero and lets the caller decide whether to climb.
 
 ```bash
 npx -y @luutuankiet/peek ~/dev/some-repo ~/dev/another/deep/file.ts
+npx -y @luutuankiet/peek myhost:/srv/app                 # over ssh
+npx -y @luutuankiet/peek https://github.com/owner/repo   # shallow clone
 ```
+
+**Three places to look, one script.** A local path is read in place. A
+`host:path` target pipes the same bash script to the host over `ssh`, so the
+host needs nothing but bash, and `ROOT:` comes back as `host:/path`. A git URL
+(https, ssh, or a GitHub `/tree/<ref>/<subdir>` link) is cloned with
+`--depth 1 --filter=blob:none` into `~/.cache/peek/`. Peeking the same repo and
+ref again within 30 minutes reuses that clone and restarts its 30 minutes. A CLI
+that exits has no timer, so expired clones are deleted at the start of the next
+peek run, and only folders peek marked as its own. `PEEK_CACHE_DIR` and
+`PEEK_TTL_MIN` override the folder and the 30 minutes.
 
 **The path can be wrong and still work.** A file three levels down resolves to
 its repository root; the nearest ancestor holding a contract file wins, with the
