@@ -84,6 +84,7 @@ When a call has no pointer but pastes a string longer than 20,000 characters, th
 ## Things to know
 
 - Claude Code writes hook output into the session's transcript file on disk. That includes the expanded contents of every pointer, so a secret sent through a pointer lands in that file too. The model never sees it.
+- If a tool is not pre-allowed and Claude Code asks you to approve the call, the approval prompt shows the expanded input, so a large upload makes a large prompt. mcp-piper never approves a call on your behalf; your own permission rules decide as usual.
 - mcp-piper keeps a small state file per call in your temp folder (`mcp-piper/state`), deleted when the call finishes; leftovers older than a day are cleaned up automatically.
 
 ## Check an install

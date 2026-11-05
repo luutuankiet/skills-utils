@@ -42,8 +42,8 @@ const postEv = (id, cwd, tool_response) => ({
 });
 
 test('defaults of the three experiment-driven settings', () => {
-  assert.equal(DECISION_WHEN_CHANGED, 'allow');
-  assert.equal(NUDGE_ROUTE, 'post');
+  assert.equal(DECISION_WHEN_CHANGED, null);
+  assert.equal(NUDGE_ROUTE, 'pre');
   assert.equal(SAVE_ERROR_RESULTS, false);
 });
 
@@ -56,7 +56,7 @@ test('pre: a call with no pointer and no _save_to prints nothing', () => {
   assert.equal(existsSync(state), false, 'no state written');
 });
 
-test('pre: pointers expand into updatedInput with "allow", every argument kept', () => {
+test('pre: pointers expand into updatedInput with no decision, every argument kept', () => {
   const { work, state, id } = setup();
   writeFileSync(join(work, 'script.js'), 'return 42;');
   const { out } = hook('pre', preEv(id, work, {
@@ -64,8 +64,7 @@ test('pre: pointers expand into updatedInput with "allow", every argument kept',
   }), state);
   const h = out.hookSpecificOutput;
   assert.equal(h.hookEventName, 'PreToolUse');
-  assert.equal(h.permissionDecision, 'allow');
-  assert.match(h.permissionDecisionReason, /^mcp-piper: /);
+  assert.equal('permissionDecision' in h, false);
   assert.deepEqual(h.updatedInput, {
     code: 'return 42;', other: 7, blobs: [{ b64: Buffer.from('return 42;').toString('base64') }], lit: '@file:x',
   });
@@ -77,6 +76,9 @@ test('pre: the decision is configurable, including no decision at all', () => {
   writeFileSync(join(work, 'a.txt'), 'A');
   const ask = pre(preEv(id, work, { a: '@file:a.txt' }), { decision: 'ask' });
   assert.equal(ask.hookSpecificOutput.permissionDecision, 'ask');
+  const allow = pre(preEv(id, work, { a: '@file:a.txt' }), { decision: 'allow' });
+  assert.equal(allow.hookSpecificOutput.permissionDecision, 'allow');
+  assert.match(allow.hookSpecificOutput.permissionDecisionReason, /^mcp-piper: /);
   const none = pre(preEv(id, work, { a: '@file:a.txt' }), { decision: null });
   assert.equal('permissionDecision' in none.hookSpecificOutput, false);
   assert.deepEqual(none.hookSpecificOutput.updatedInput, { a: 'A' });
@@ -114,19 +116,19 @@ test('pre: _save_to is stripped, its folder created, and state written', () => {
 
 const big = 'y'.repeat(20001);
 
-test('nudge, post route (default): pre stays silent, post adds the tip', () => {
+test('nudge, pre route (default): additionalContext on PreToolUse, input untouched, no state', () => {
   const { work, state, id } = setup();
-  const p = hook('pre', preEv(id, work, { text: big }), state);
-  assert.equal(p.stdout, '');
-  const { out } = hook('post', postEv(id, work, [{ type: 'text', text: 'ok' }]), state);
-  assert.deepEqual(out, { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: NUDGE_TEXT } });
+  const { out } = hook('pre', preEv(id, work, { text: big }), state);
+  assert.deepEqual(out, { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: NUDGE_TEXT } });
   assert.equal(existsSync(join(state, `${id}.json`)), false);
 });
 
-test('nudge, pre route: additionalContext on PreToolUse, input untouched', () => {
-  const { work, id } = setup();
-  const out = pre(preEv(id, work, { text: big }), { nudgeRoute: 'pre' });
-  assert.deepEqual(out, { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: NUDGE_TEXT } });
+test('nudge, post route: pre stays silent, post adds the tip', () => {
+  const { work, state, id } = setup();
+  assert.equal(pre(preEv(id, work, { text: big }), { nudgeRoute: 'post' }), null);
+  const out = post(postEv(id, work, [{ type: 'text', text: 'ok' }]), { nudgeRoute: 'post' });
+  assert.deepEqual(out, { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: NUDGE_TEXT } });
+  assert.equal(existsSync(join(state, `${id}.json`)), false);
 });
 
 test('nudge: never on a call whose input was expanded from a pointer', () => {
@@ -139,10 +141,16 @@ test('nudge: never on a call whose input was expanded from a pointer', () => {
   }
 });
 
-test('nudge with _save_to: the stub and the tip arrive together', () => {
+test('nudge with _save_to: pre route tips on PreToolUse, post route with the stub', () => {
   const { work, id } = setup();
-  pre(preEv(id, work, { text: big, _save_to: 'o.txt' }));
-  const out = post(postEv(id, work, [{ type: 'text', text: 'res' }]));
+  const p = pre(preEv(id, work, { text: big, _save_to: 'o.txt' }));
+  assert.equal(p.hookSpecificOutput.additionalContext, NUDGE_TEXT);
+  assert.deepEqual(p.hookSpecificOutput.updatedInput, { text: big });
+  const plain = post(postEv(id, work, [{ type: 'text', text: 'res' }]));
+  assert.equal(plain.hookSpecificOutput.additionalContext, undefined);
+  assert.match(plain.hookSpecificOutput.updatedToolOutput[0].text, /^mcp-piper: saved 1 file/);
+  pre(preEv(id, work, { text: big, _save_to: 'o.txt' }), { nudgeRoute: 'post' });
+  const out = post(postEv(id, work, [{ type: 'text', text: 'res' }]), { nudgeRoute: 'post' });
   assert.equal(out.hookSpecificOutput.additionalContext, NUDGE_TEXT);
   assert.match(out.hookSpecificOutput.updatedToolOutput[0].text, /^mcp-piper: saved 1 file/);
 });
@@ -270,7 +278,7 @@ test('bad stdin never breaks the call', () => {
   }
 });
 
-test('an internal crash with a pointer involved denies; without one stays silent', () => {
+test('an internal crash with _save_to involved denies; a call without it is untouched', () => {
   const { work } = setup();
   // A state folder that is a file makes writeState throw a plain error.
   const blocker = join(work, 'state-is-a-file');
@@ -279,7 +287,7 @@ test('an internal crash with a pointer involved denies; without one stays silent
   assert.equal(withSave.out.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(withSave.out.hookSpecificOutput.permissionDecisionReason, /^mcp-piper: internal error/);
   const plain = hook('pre', preEv('toolu_crash2', work, { text: big }), blocker);
-  assert.equal(plain.stdout, '');
+  assert.deepEqual(plain.out, { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: NUDGE_TEXT } });
 });
 
 // ------------------------------------------------------------------- the CLI ---

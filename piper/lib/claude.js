@@ -9,26 +9,33 @@ import {
 } from './core.js';
 
 // ---------------------------------------------------------------- settings ---
-// Three behaviours still being settled by experiment against Claude Code.
+// Three behaviours, each settled by nested Claude Code runs (version 2.1.318).
 
 /**
  * permissionDecision sent with updatedInput when mcp-piper changed the input.
  * "allow" skips the user's permission prompt for that call; "ask" keeps it;
  * null sends no decision at all. Calls mcp-piper does not change get no output.
+ * null is the default: Claude Code still applies updatedInput, and the user's
+ * own permission rules decide as they would without mcp-piper. "allow" would
+ * run tools the user never allowed; "ask" forces a prompt even in bypass mode.
  */
-export const DECISION_WHEN_CHANGED = 'allow';
+export const DECISION_WHEN_CHANGED = null;
 
 /**
  * Where the inline-paste tip goes: "pre" adds it as PreToolUse
  * additionalContext; "post" flags the call in a state file and adds it as
  * PostToolUse additionalContext once the result is back.
+ * "pre" is the default: it needs no state file and reaches the agent even
+ * when the call then fails.
  */
-export const NUDGE_ROUTE = 'post';
+export const NUDGE_ROUTE = 'pre';
 
 /**
  * When a result looks like an error and the call asked for `_save_to`:
  * false passes the error through to the agent untouched and saves nothing;
- * true saves it like any other result.
+ * true saves it like any other result. Claude Code sends a tool error to
+ * PostToolUseFailure rather than PostToolUse, so this only matters for a
+ * result that marks itself as an error inside a successful call.
  */
 export const SAVE_ERROR_RESULTS = false;
 
