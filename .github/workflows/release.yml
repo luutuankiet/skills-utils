@@ -1,13 +1,16 @@
-# Publishes cli/ to npm as @luutuankiet/peek when a vX.Y.Z tag is pushed.
+# Publishes cli/ to npm as @luutuankiet/peek when a vX.Y.Z tag is pushed,
+# and piper/ as @luutuankiet/mcp-piper when a piper-vX.Y.Z tag is pushed.
 name: Release
 
 on:
   push:
     tags:
       - 'v*.*.*'
+      - 'piper-v*.*.*'
 
 jobs:
   npm-publish:
+    if: startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -50,4 +53,48 @@ jobs:
           # publish credential. The package's trusted publisher on npmjs.com
           # must name this repo and release.yml, or the publish is refused.
           # The repo is public, so provenance is attached.
+          npm publish --access public --provenance
+
+  piper-publish:
+    if: startsWith(github.ref_name, 'piper-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: piper
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm (trusted publishing needs 11.5.1 or later)
+        run: npm install -g npm@latest
+
+      - name: Verify the tag matches piper/package.json
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#piper-v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ($TAG_VERSION) != piper/package.json ($PKG_VERSION). Bump it before tagging."
+            exit 1
+          fi
+
+      - name: Run tests
+        run: npm test
+
+      - name: Publish @luutuankiet/mcp-piper
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "@luutuankiet/mcp-piper@$PKG_VERSION" version >/dev/null 2>&1; then
+            echo "@luutuankiet/mcp-piper@$PKG_VERSION is already on npm; nothing to publish."
+            exit 0
+          fi
+          # Same trusted publishing as above: the package's trusted publisher
+          # on npmjs.com must name this repo and release.yml.
           npm publish --access public --provenance
