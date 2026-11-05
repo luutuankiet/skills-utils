@@ -396,6 +396,141 @@ test('stub: one line per file with size, sha prefix and kind, plus warnings, no 
   assert.match(buildStub({ files: [{ path: '/a', bytes: 1, sha: '0', kind: 'text' }] }), /^mcp-piper: saved 1 file\n/);
 });
 
+// ------------------------------------------- embedded resources in a folder ---
+// Claude Code (2.1.318) never hands a hook the MCP `resource` block itself. It
+// renders a text resource as "[Resource from <server> at <uri>] <text>", an
+// image blob as that header with nothing after it, then the image block and an
+// "[Image: source: <path>]" line, and any other blob as "... Binary content
+// (<mime>, <N> bytes) saved to <path>". Both that and the raw MCP shape count.
+
+const res = (uri, body) => ({ type: 'text', text: `[Resource from lab at ${uri}] ${body}` });
+const raw = (resource) => ({ type: 'resource', resource });
+
+test('folder save: relative resources land at their paths, subfolders created', () => {
+  const d = fresh();
+  const target = validateSaveTo(`${d}/wc/`);
+  const blob = Buffer.from([0, 1, 2, 255]);
+  const saved = saveResult(normaliseResult([
+    { type: 'text', text: 'pulled 2 tabs' },
+    res('tab.md', '# One\n'),
+    res('nested/deep/two.md', '# Two'),
+    raw({ uri: 'file:raw/text.txt', mimeType: 'text/plain', text: 'raw text' }),
+    raw({ uri: 'raw/blob.bin', mimeType: 'application/octet-stream', blob: blob.toString('base64') }),
+  ]), target);
+  const wc = join(d, 'wc');
+  assert.equal(readFileSync(join(wc, 'result.txt'), 'utf8'), 'pulled 2 tabs');
+  assert.equal(readFileSync(join(wc, 'tab.md'), 'utf8'), '# One\n');
+  assert.equal(readFileSync(join(wc, 'nested/deep/two.md'), 'utf8'), '# Two');
+  assert.equal(readFileSync(join(wc, 'raw/text.txt'), 'utf8'), 'raw text');
+  assert.deepEqual(readFileSync(join(wc, 'raw/blob.bin')), blob);
+  assert.deepEqual(saved.files.map((f) => f.path).sort(), [
+    'nested/deep/two.md', 'raw/blob.bin', 'raw/text.txt', 'result.txt', 'tab.md'].map((p) => join(wc, p)).sort());
+  const stub = buildStub(saved);
+  assert.match(stub, /^mcp-piper: saved 5 files/);
+  for (const f of saved.files) assert.ok(stub.includes(f.path));
+  assert.ok(!stub.includes('# One'));
+});
+
+test('folder save: mixed text, plain image and image, binary and text resources (Claude Code shape)', () => {
+  const d = fresh();
+  const target = validateSaveTo(`${d}/wc/`);
+  const plainOrig = join(d, 'plain-orig.png');
+  writeFileSync(plainOrig, 'PLAIN_ORIGINAL');
+  const resOrig = join(d, 'res-orig.png');
+  writeFileSync(resOrig, 'RES_ORIGINAL');
+  const binSaved = join(d, 'mcp-lab-blob.bin');
+  const binBytes = Buffer.from('BIN\x00\x01\xff', 'latin1');
+  writeFileSync(binSaved, binBytes);
+  const saved = saveResult(normaliseResult([
+    { type: 'text', text: 'caption' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from('recompressed').toString('base64') } },
+    { type: 'text', text: `[Image: source: ${plainOrig}]` },
+    res('tab.md', '# Tab\n'),
+    res('images/dot.png', ''),
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from('recompressed2').toString('base64') } },
+    { type: 'text', text: `[Image: source: ${resOrig}]` },
+    res('data/raw.bin', `Binary content (application/octet-stream, ${binBytes.length} bytes) saved to ${binSaved}`),
+    res('https://example.com/far.txt', 'URL_RES'),
+  ]), target);
+  const wc = join(d, 'wc');
+  assert.equal(readFileSync(join(wc, 'result.txt'), 'utf8'),
+    'caption\n[Resource from lab at https://example.com/far.txt] URL_RES', 'a non-relative uri stays in result.txt as today');
+  assert.equal(readFileSync(join(wc, 'img1.png'), 'utf8'), 'PLAIN_ORIGINAL', 'a plain image keeps the img<N> name');
+  assert.equal(readFileSync(join(wc, 'images/dot.png'), 'utf8'), 'RES_ORIGINAL', 'an image resource takes the original bytes');
+  assert.equal(readFileSync(join(wc, 'tab.md'), 'utf8'), '# Tab\n');
+  assert.deepEqual(readFileSync(join(wc, 'data/raw.bin')), binBytes);
+  assert.equal(existsSync(join(wc, 'img2.png')), false);
+  assert.deepEqual(readdirSync(wc).sort(), ['data', 'images', 'img1.png', 'result.txt', 'tab.md']);
+  assert.equal(saved.files.length, 5);
+  assert.deepEqual(saved.warnings, []);
+});
+
+test('folder save: a resources-only reply writes no result.txt; an empty text resource is an empty file', () => {
+  const d = fresh();
+  const target = validateSaveTo(`${d}/`);
+  const saved = saveResult(normaliseResult([res('a.md', 'A'), res('empty.md', '')]), target);
+  assert.deepEqual(readdirSync(d).sort(), ['a.md', 'empty.md']);
+  assert.equal(readFileSync(join(d, 'empty.md'), 'utf8'), '');
+  assert.equal(saved.files.length, 2);
+});
+
+test('folder save: an existing file is overwritten', () => {
+  const d = fresh();
+  mkdirSync(join(d, 'sub'));
+  writeFileSync(join(d, 'sub/tab.md'), 'OLD CONTENT THAT IS LONGER');
+  saveResult(normaliseResult([res('sub/tab.md', 'new')]), validateSaveTo(`${d}/`));
+  assert.equal(readFileSync(join(d, 'sub/tab.md'), 'utf8'), 'new');
+});
+
+test('file save (no trailing /): resources keep today\'s behaviour', () => {
+  const d = fresh();
+  const out = join(d, 'out.txt');
+  saveResult(normaliseResult([res('tab.md', 'T'), raw({ uri: 'x.md', text: 'X' })]), out);
+  assert.deepEqual(readdirSync(d), ['out.txt']);
+  assert.equal(readFileSync(out, 'utf8'), `[Resource from lab at tab.md] T\n${JSON.stringify(raw({ uri: 'x.md', text: 'X' }))}`);
+});
+
+for (const [label, uri, why] of [
+  ['an absolute path', '/etc/passwd-piper', /absolute/],
+  ['an absolute file: uri', 'file:///tmp/x.md', /absolute/],
+  ['a .. segment', 'a/../b.md', /"\.\."/],
+  ['a leading ..', '../escape.md', /"\.\."/],
+  ['a backslash ..', 'a\\..\\..\\b.md', /"\.\."/],
+]) {
+  test(`folder save refuses ${label}, before anything is written`, () => {
+    const d = fresh();
+    const target = validateSaveTo(`${d}/wc/`);
+    assert.throws(() => saveResult(normaliseResult([
+      { type: 'text', text: 'first' }, res('ok.md', 'fine'), res(uri, 'bad'),
+    ]), target), (e) => e instanceof PiperError && e.message.startsWith('mcp-piper:') && why.test(e.message) && e.message.includes(uri));
+    assert.deepEqual(readdirSync(join(d, 'wc')), [], 'nothing written');
+  });
+}
+
+test('folder save refuses a path that resolves outside the folder through a symlinked folder', () => {
+  const d = fresh();
+  const outside = fresh('piper-outside-');
+  mkdirSync(join(d, 'wc'));
+  symlinkSync(outside, join(d, 'wc', 'link'));
+  const target = validateSaveTo(`${d}/wc/`);
+  assert.throws(() => saveResult(normaliseResult([res('ok.md', 'x'), res('link/evil.md', 'bad')]), target),
+    (e) => e instanceof PiperError && e.message.startsWith('mcp-piper:') && /outside/.test(e.message));
+  assert.deepEqual(readdirSync(outside), []);
+  assert.equal(existsSync(join(d, 'wc', 'ok.md')), false);
+});
+
+test('folder save refuses a target that is a symlink', () => {
+  const d = fresh();
+  mkdirSync(join(d, 'wc'));
+  writeFileSync(join(d, 'wc', 'real.md'), 'REAL');
+  symlinkSync(join(d, 'wc', 'real.md'), join(d, 'wc', 'tab.md'));
+  const target = validateSaveTo(`${d}/wc/`);
+  assert.throws(() => saveResult(normaliseResult([{ type: 'text', text: 'caption' }, res('tab.md', 'bad')]), target),
+    (e) => e instanceof PiperError && e.message.startsWith('mcp-piper:') && /symlink/.test(e.message));
+  assert.equal(readFileSync(join(d, 'wc', 'real.md'), 'utf8'), 'REAL');
+  assert.equal(existsSync(join(d, 'wc', 'result.txt')), false);
+});
+
 test('siblingPath keeps the stem and folder', () => {
   assert.equal(siblingPath('/a/b/out.json', 'img', 2, '.png'), '/a/b/out-img2.png');
   assert.equal(siblingPath('/a/noext', 'img', 1, '.jpg'), '/a/noext-img1.jpg');

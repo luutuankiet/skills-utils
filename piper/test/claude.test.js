@@ -256,6 +256,31 @@ test('post: if saving fails, the result is shown in full with a note', () => {
   assert.match(out.hookSpecificOutput.additionalContext, /could not save the result/);
 });
 
+test('post: _save_to ending in / writes embedded resources at their paths, stub lists them', () => {
+  const { work, text } = roundTrip([
+    { type: 'text', text: 'pulled' },
+    { type: 'text', text: '[Resource from docs at tabs/1 Intro.md] # Intro\n' },
+  ], 'wc/');
+  assert.equal(readFileSync(join(work, 'wc', 'result.txt'), 'utf8'), 'pulled');
+  assert.equal(readFileSync(join(work, 'wc', 'tabs', '1 Intro.md'), 'utf8'), '# Intro\n');
+  assert.match(text, /^mcp-piper: saved 2 files\n/);
+  assert.ok(text.includes(join(work, 'wc', 'tabs', '1 Intro.md')));
+  assert.ok(!text.includes('# Intro'));
+});
+
+test('post: a refused resource path writes nothing and shows the result with the mcp-piper reason', () => {
+  const { work, state, id } = setup();
+  hook('pre', preEv(id, work, { q: 'x', _save_to: 'wc/' }), state);
+  const { out } = hook('post', postEv(id, work, [
+    { type: 'text', text: '[Resource from docs at ok.md] fine' },
+    { type: 'text', text: '[Resource from docs at ../escape.md] bad' },
+  ]), state);
+  assert.equal(out.hookSpecificOutput.updatedToolOutput, undefined, 'result passes through');
+  assert.match(out.hookSpecificOutput.additionalContext, /^mcp-piper: refused to save the resource "\.\.\/escape\.md"/);
+  assert.deepEqual(readdirSync(join(work, 'wc')), []);
+  assert.equal(existsSync(join(work, 'escape.md')), false);
+});
+
 // -------------------------------------------------------------- start notes ---
 
 test('session-start and subagent-start add the memory note verbatim', () => {

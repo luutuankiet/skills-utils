@@ -29,7 +29,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(here, '..', '..', '..');
 const SERVER = join(here, 'server.js');
 const sha16 = (b) => createHash('sha256').update(b).digest('hex').slice(0, 16);
-const LAB = ['echo', 'text', 'text_n', 'big_text', 'structured', 'image', 'link', 'fail'].map((t) => `mcp__lab__${t}`);
+const LAB = ['echo', 'text', 'text_n', 'big_text', 'structured', 'image', 'link', 'resources', 'fail'].map((t) => `mcp__lab__${t}`);
 const STUB = 'mcp-piper: saved';
 const NOTE = 'mcp-piper is active for MCP tools';
 const TIP = 'mcp-piper: next time pass large text as';
@@ -150,6 +150,26 @@ const CASES = {
     return { prompt: one('mcp__lab__structured', { _save_to: o }), checks: [
       ['result is stub', 'result', STUB, true], ['result lacks payload', 'result', 'LAB_STRUCT_NEEDLE', false],
       ['file has payload', fileHas(o, 'LAB_STRUCT_NEEDLE')]] };
+  },
+  'save-resources': (d) => {
+    const o = join(d, 'out', 'wc') + '/';
+    const wc = join(d, 'out', 'wc');
+    const dot = join(wc, 'images', 'dot.png');
+    return { prompt: one('mcp__lab__resources', { _save_to: o }), checks: [
+      ['result is stub', 'result', `- ${join(wc, 'tab.md')}`, true], ['result lacks resource text', 'result', 'LAB_RES_TEXT_NEEDLE', false],
+      ['result has no image block', 'resultRaw', '"type":"image"', false],
+      ['text resource at its path', fileHas(join(wc, 'tab.md'), 'LAB_RES_TEXT_NEEDLE')],
+      ['binary resource at its path', fileHas(join(wc, 'data', 'raw.bin'), 'LAB_RES_BLOB_NEEDLE')],
+      ['caption and url resource in result.txt', (c) => {
+        const p = join(wc, 'result.txt');
+        const t = existsSync(p) ? readFileSync(p, 'utf8') : '';
+        return [t.includes('LAB_RES_CAPTION') && t.includes('LAB_URL_RES_NEEDLE'), `${p}: ${JSON.stringify(t)}`];
+      }],
+      ['image resource is the original bytes', (c) => {
+        const sent = c.server.find((r) => r.tool === 'resources')?.sent;
+        const got = existsSync(dot) ? sha16(readFileSync(dot)) : null;
+        return [Boolean(sent) && sent === got, `server sent ${sent}, ${dot} sha ${got}`];
+      }]] };
   },
   'save-image': (d) => {
     const o = join(d, 'out', 'pic.txt');

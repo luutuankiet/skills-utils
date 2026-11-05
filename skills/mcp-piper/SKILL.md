@@ -93,6 +93,15 @@ mcp-piper: saved 2 files
   the text goes to `result.txt` (`result.json` for a JSON result) and images
   to `img1.png`, `img2.jpg` and so on inside it. A path without `/` that does
   not exist yet is a file.
+- In a folder save, each **embedded resource** whose `uri` is a relative path
+  (`tab.md`, `images/x.png`, or `file:` relative) is written to
+  `<folder>/<uri>`, subfolders created, so a tool that returns several files
+  lands them as files. Text resources are written as text, binary ones as their
+  bytes. Resources with any other `uri` (`https://...`) go into `result.txt`
+  as before. The stub lists every file written.
+- A resource path that is absolute, has a `..` segment, resolves outside the
+  folder or names a symlink is refused: nothing is written and you see the full
+  result with a reason starting `mcp-piper: refused to save the resource`.
 - Text blocks go into the `_save_to` file, joined by newlines.
 - A JSON result (`structuredContent`) is pretty-printed into the `_save_to` file.
 - Each image goes to its own file beside it: `<stem>-img1.png`, `<stem>-img2.jpg`,

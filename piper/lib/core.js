@@ -7,11 +7,11 @@
 
 import {
   readFileSync, writeFileSync, statSync, lstatSync, mkdirSync, accessSync, unlinkSync,
-  readdirSync, constants as fsc,
+  readdirSync, realpathSync, constants as fsc,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const NUDGE_THRESHOLD = 20000;
 export const NUDGE_TEXT = 'mcp-piper: next time pass large text as "@file:<path>" instead of pasting it';
@@ -343,21 +343,89 @@ function readSource(p) {
   try { return readFileSync(p); } catch { return null; }
 }
 
+// Claude Code (2.1.318) renders each MCP embedded resource as text before a
+// hook sees it: "[Resource from <server> at <uri>] <text>". An image blob gets
+// that header with nothing after it, then an image block and an
+// "[Image: source: <path>]" line; any other blob gets "Binary content (<mime>,
+// <N> bytes) saved to <path>" as its text.
+const RESOURCE_HEADER = /^\[Resource from (.+?) at (.+?)\] ([\s\S]*)$/;
+const RESOURCE_BINARY = /^Binary content \(([^,()]+), (\d+) bytes\) saved to (.+)$/;
+const URI_SCHEME = /^([a-zA-Z][a-zA-Z0-9+.-]*):/;
+
+/**
+ * The relative path a resource uri names, or null when the uri is not a path
+ * (it has a scheme other than `file:`), which keeps today's behaviour.
+ * Throws PiperError for an absolute path or a ".." segment.
+ */
+export function resourcePath(uri) {
+  let p = String(uri);
+  const refuse = (why) => new PiperError(`mcp-piper: refused to save the resource "${uri}" into the _save_to folder: ${why}. Nothing was written; the result is shown in full instead.`);
+  if (/^[a-zA-Z]:[\\/]/.test(p)) throw refuse('it is an absolute path');
+  const m = URI_SCHEME.exec(p);
+  if (m) {
+    if (m[1].toLowerCase() !== 'file') return null;
+    p = p.slice(m[0].length);
+    if (p.startsWith('//')) throw refuse('it is an absolute path');
+    try { p = decodeURIComponent(p); } catch { /* keep it as written */ }
+  }
+  if (p.startsWith('/') || p.startsWith('\\')) throw refuse('it is an absolute path');
+  const parts = p.split(/[\\/]/);
+  if (parts.includes('..')) throw refuse('it has a ".." segment');
+  if (parts.every((x) => x === '' || x === '.')) throw refuse('it names no file');
+  return p;
+}
+
+/**
+ * Where a resource goes inside `folder`, checked before anything is written:
+ * it must stay inside the folder once symlinks along the way resolve, must
+ * not itself be a symlink and must not be a folder. Throws PiperError.
+ */
+function resourceTarget(folder, uri, rel) {
+  const refuse = (why) => new PiperError(`mcp-piper: refused to save the resource "${uri}" into the _save_to folder: ${why}. Nothing was written; the result is shown in full instead.`);
+  const root = resolve(folder);
+  const target = resolve(root, rel);
+  const inside = (base, p) => { const r = relative(base, p); return r !== '' && !r.startsWith('..') && !isAbsolute(r); };
+  if (!inside(root, target)) throw refuse('it resolves outside the folder');
+  let ls = null;
+  try { ls = lstatSync(target); } catch { /* not there yet */ }
+  if (ls && ls.isSymbolicLink()) throw refuse(`${target} is a symlink`);
+  if (ls && ls.isDirectory()) throw refuse(`${target} is a folder`);
+  // The deepest folder that already exists must resolve inside the real root.
+  let existing = dirname(target);
+  while (existing !== root && !lstatOk(existing)) existing = dirname(existing);
+  let realRoot; let realExisting;
+  try {
+    realRoot = realpathSync(root);
+    realExisting = realpathSync(existing);
+  } catch (err) {
+    throw refuse(`cannot resolve ${existing} (${err.code || err.message})`);
+  }
+  if (realExisting !== realRoot && !inside(realRoot, realExisting)) throw refuse('it resolves outside the folder through a symlink');
+  return target;
+}
+
+function lstatOk(p) {
+  try { lstatSync(p); return true; } catch { return false; }
+}
+
 /**
  * Save a normalised result to `target` (absolute). Text goes to `target`,
  * each image to `<stem>-img<N>.<ext>` beside it. A folder target (trailing
- * separator) gets `result.txt` (or `result.json`) and `img<N>.<ext>` inside it. Links are never followed:
- * a `[Resource link: ...]` line is saved as the text it is.
+ * separator) gets `result.txt` (or `result.json`) and `img<N>.<ext>` inside
+ * it, and each embedded resource whose uri is a relative path is written to
+ * `<folder>/<uri>`. Every resource path is checked before anything is
+ * written; a bad one throws PiperError. Links are never followed: a
+ * `[Resource link: ...]` line is saved as the text it is.
  *
  * @returns {{ files: {path: string, bytes: number, sha: string, kind: string}[], warnings: string[] }}
  */
 export function saveResult(result, target) {
   const folder = isFolderTarget(target);
   const saveTo = folder ? join(target, result.kind === 'json' ? 'result.json' : 'result.txt') : target;
-  mkdirSync(dirname(saveTo), { recursive: true });
   const files = [];
   const warnings = [];
   const write = (p, buf, kind) => {
+    mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, buf);
     files.push({ path: p, bytes: buf.length, sha: sha16(buf), kind });
   };
@@ -371,32 +439,61 @@ export function saveResult(result, target) {
 
   const texts = [];
   const sources = [];
-  const images = [];
+  const images = []; // { block, path? } path set for an image resource
   const audio = [];
+  const resources = []; // { path, uri, mime, text? | data? | from? }
+  let pendingImage = null; // a header with an empty body waits for its image
+  const flushPending = () => {
+    if (pendingImage) resources.push({ ...pendingImage, text: '' });
+    pendingImage = null;
+  };
   for (const b of result.blocks) {
     if (!b || typeof b !== 'object') continue;
+    if (b.type === 'image') {
+      images.push({ block: b, ...(pendingImage ? { path: pendingImage.path, uri: pendingImage.uri } : {}) });
+      pendingImage = null;
+      continue;
+    }
+    flushPending();
     if (b.type === 'text') {
+      const text = String(b.text ?? '');
+      const h = folder ? RESOURCE_HEADER.exec(text) : null;
+      const rel = h ? resourcePath(h[2]) : null;
+      if (rel !== null) {
+        const r = { uri: h[2], path: resourceTarget(target, h[2], rel) };
+        const bin = RESOURCE_BINARY.exec(h[3]);
+        if (h[3] === '') pendingImage = r;
+        else if (bin && sizeIs(bin[3], Number(bin[2]))) resources.push({ ...r, mime: bin[1], from: bin[3] });
+        else resources.push({ ...r, text: h[3] });
+        continue;
+      }
       const kept = [];
       let dropped = 0;
-      for (const line of String(b.text ?? '').split('\n')) {
+      for (const line of text.split('\n')) {
         const m = IMAGE_SOURCE.exec(line);
         if (m) { sources.push(m[1]); dropped++; } else kept.push(line);
       }
       // A block that held only image source lines leaves nothing behind.
       if (!(dropped && kept.join('').trim() === '')) texts.push(kept.join('\n'));
-    } else if (b.type === 'image') {
-      images.push(b);
     } else if (b.type === 'audio') {
       audio.push(b);
+    } else if (folder && b.type === 'resource' && b.resource && typeof b.resource === 'object'
+      && resourcePath(b.resource.uri ?? '') !== null) {
+      const { uri, mimeType, text, blob } = b.resource;
+      const path = resourceTarget(target, uri, resourcePath(uri));
+      resources.push(typeof blob === 'string'
+        ? { uri, path, mime: mimeType || 'application/octet-stream', data: blob }
+        : { uri, path, mime: mimeType || 'text', text: String(text ?? '') });
     } else {
       texts.push(JSON.stringify(b));
     }
   }
+  flushPending();
 
   const text = texts.join('\n');
   const t = detectTruncation(text);
   if (t) warnings.push(truncationWarning(t));
-  if (texts.length || (!images.length && !sources.length && !audio.length)) {
+  if (texts.length || (!images.length && !sources.length && !audio.length && !resources.length)) {
     write(saveTo, Buffer.from(text, 'utf8'), 'text');
   }
 
@@ -404,8 +501,10 @@ export function saveResult(result, target) {
   // naming the file that holds the server's original bytes. Prefer the
   // original; decode the block only when there is no readable source.
   const count = Math.max(images.length, sources.length);
+  let plain = 0;
   for (let i = 0; i < count; i++) {
-    const block = images[i];
+    const block = images[i]?.block;
+    const resPath = images[i]?.path;
     const src = sources[i] ? readSource(sources[i]) : null;
     let buf; let ext; let mime;
     if (src) {
@@ -421,7 +520,7 @@ export function saveResult(result, target) {
       warnings.push(`warning: image ${i + 1} pointed at ${sources[i]}, which could not be read, and had no data to fall back on; it was not saved.`);
       continue;
     }
-    write(siblingPath(target, 'img', i + 1, ext), buf, mime);
+    write(resPath || siblingPath(target, 'img', ++plain, ext), buf, mime);
   }
   audio.forEach((b, i) => {
     const mime = b.mimeType || 'application/octet-stream';
@@ -429,7 +528,22 @@ export function saveResult(result, target) {
     const ext = sub && /^[a-z0-9]+$/.test(sub) ? `.${sub}` : '.bin';
     write(siblingPath(target, 'audio', i + 1, ext), Buffer.from(b.data ?? '', 'base64'), mime);
   });
+  for (const r of resources) {
+    if (r.from !== undefined) {
+      const buf = readSource(r.from);
+      if (buf) write(r.path, buf, r.mime);
+      else warnings.push(`warning: the resource ${r.uri} pointed at ${r.from}, which could not be read; it was not saved.`);
+    } else if (r.data !== undefined) {
+      write(r.path, Buffer.from(r.data, 'base64'), r.mime);
+    } else {
+      write(r.path, Buffer.from(r.text, 'utf8'), r.mime || 'text');
+    }
+  }
   return { files, warnings };
+}
+
+function sizeIs(p, n) {
+  try { return statSync(p).size === n; } catch { return false; }
 }
 
 /** The short text the agent sees instead of the result. Never any payload. */

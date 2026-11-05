@@ -150,11 +150,14 @@ export function post(ev, options = {}) {
     try {
       saved = saveResult(normaliseResult(resp), state.saveTo);
     } catch (err) {
-      // Better the agent reads the result than loses it.
+      // Better the agent reads the result than loses it. A PiperError (a
+      // refused resource path) already says what happened and what to do.
       return {
         hookSpecificOutput: {
           hookEventName: 'PostToolUse',
-          additionalContext: `mcp-piper: could not save the result to ${state.saveTo} (${err.code || err.message}), so it is shown in full instead.`,
+          additionalContext: err instanceof PiperError
+            ? err.message
+            : `mcp-piper: could not save the result to ${state.saveTo} (${err.code || err.message}), so it is shown in full instead.`,
         },
       };
     }

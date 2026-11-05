@@ -12,6 +12,8 @@
 //   structured  a text block plus structuredContent holding LAB_STRUCT_NEEDLE
 //   image       a text block plus a generated 16x16 PNG
 //   link        a text block plus a resource_link to https://example.com/LAB_LINK_NEEDLE.bin
+//   resources   a text block, embedded resources at relative uris (tab.md, images/dot.png, data/raw.bin)
+//               and one at https://example.com/LAB_URL_RES.txt
 //   fail        isError: true with LAB_FAIL_NEEDLE
 import { appendFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -73,6 +75,7 @@ const tools = [
   ['structured', 'Returns a JSON result as structuredContent.'],
   ['image', 'Returns a small PNG image.'],
   ['link', 'Returns a resource link.'],
+  ['resources', 'Returns several files as embedded resources.'],
   ['fail', 'Always returns a tool error (isError true).'],
 ].map(([name, description]) => ({ name, description, inputSchema: schemas[name] ?? anyArgs }));
 
@@ -96,6 +99,14 @@ function call(name, a) {
       return { content: [t('LAB_IMAGE_CAPTION'), { type: 'image', data: PNG.toString('base64'), mimeType: 'image/png' }] };
     case 'link':
       return { content: [t('LAB_LINK_CAPTION'), { type: 'resource_link', uri: 'https://example.com/LAB_LINK_NEEDLE.bin', name: 'LAB_LINK_NEEDLE.bin', mimeType: 'application/octet-stream' }] };
+    case 'resources':
+      return { content: [
+        t('LAB_RES_CAPTION'),
+        { type: 'resource', resource: { uri: 'tab.md', mimeType: 'text/markdown', text: '# LAB_RES_TEXT_NEEDLE\n' } },
+        { type: 'resource', resource: { uri: 'images/dot.png', mimeType: 'image/png', blob: PNG.toString('base64') } },
+        { type: 'resource', resource: { uri: 'data/raw.bin', mimeType: 'application/octet-stream', blob: Buffer.from('LAB_RES_BLOB_NEEDLE\x00\x01\xff', 'latin1').toString('base64') } },
+        { type: 'resource', resource: { uri: 'https://example.com/LAB_URL_RES.txt', mimeType: 'text/plain', text: 'LAB_URL_RES_NEEDLE' } },
+      ] };
     case 'fail':
       return { isError: true, content: [t('LAB_FAIL_NEEDLE: the tool failed on purpose')] };
     default: return null;
@@ -113,7 +124,7 @@ function handle(m) {
   if (m.method === 'ping') return ok({});
   if (m.method === 'tools/call') {
     const { name, arguments: a } = m.params || {};
-    log({ tool: name, args: a, ...(name === 'image' ? { sent: sha16(PNG) } : {}) });
+    log({ tool: name, args: a, ...(name === 'image' || name === 'resources' ? { sent: sha16(PNG) } : {}) });
     const r = call(name, a);
     if (r) return ok(r);
   }
