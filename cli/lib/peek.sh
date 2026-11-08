@@ -3,6 +3,7 @@
 # peek.sh -- another repository's Level 0, from outside it.
 #
 #   peek.sh <path> [<path> ...]
+#   peek.sh --nested <dir>
 #
 # A session only ever preloads the context of the directory it was spawned in.
 # When it has to reason about a repository next door, it otherwise pays for a
@@ -24,11 +25,11 @@ MAXDEPTH_SKILLS=4     # context-lab nests at skills/<bucket>/<skill>/SKILL.md
 # Vendored and build directories, in one place. A second copy of this list is a
 # second chance to forget one, and a vendored SKILL.md printed as if the repo
 # shipped it is a silent wrong answer, not a visible failure.
-IGNORE_DIRS="node_modules .git .venv venv target dist build __pycache__ .next .tox"
+IGNORE_DIRS="node_modules .git .venv venv vendor target dist build __pycache__ .next .tox .cache"
 CONTRACTS="CLAUDE.md AGENTS.md"
 IMPORT_DEPTH=2
 
-usage() { sed -n '3,5p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; }
+usage() { sed -n '3,6p' "$0" | sed 's/^#\{1,\} \{0,1\}//'; }
 
 # Prepended to every printed root. SSH mode passes "host:" so the caller reads
 # ROOT: host:/path and knows the files are not on its own disk.
@@ -294,7 +295,231 @@ emit_explore() {
   [ -n "$files" ] && printf '%s\n' "$files" | emit_tree || printf '  (no files)\n'
 }
 
+# ---------------------------------------------- nested: what lies below ---
+#
+#   peek.sh --nested <dir>
+#
+# A session preloads the contract files of the folder it starts in and nothing
+# below it. A nested AGENTS.md is read only once the agent happens to open a
+# file under that folder, so a gitignored work-in-progress index can sit one
+# level down and never be seen. This lists those folders, one line each, so
+# the agent can decide whether to peek one. It never prints their contents.
+#
+# Silent when there is nothing nested: a hook prints this into every session.
+
+NESTED_MARKERS="AGENTS.md CLAUDE.md CLAUDE.local.md"
+NESTED_MAX_LINES=10
+NESTED_PREVIEW_CHARS=120
+
+# The marker files, relative to the current directory, one per line. One
+# process only, so the caller's kill timer stops the whole walk. .gitignore is
+# deliberately not honoured: gitignored work in progress is the main case.
+nested_walk() {
+  local engine="$1" args=() ign m first=1
+  if [ "$engine" = "rg" ]; then
+    args=(--files --no-config --no-ignore --hidden --no-messages)
+    for m in $NESTED_MARKERS; do args+=(-g "$m"); done
+    for ign in $IGNORE_DIRS; do args+=(-g "!$ign"); done
+    exec nice -n 10 rg "${args[@]}"
+  fi
+  for ign in $IGNORE_DIRS; do
+    [ "$first" -eq 1 ] && first=0 || args+=(-o)
+    args+=(-name "$ign")
+  done
+  args+=(')' -prune -o -type f '(')
+  first=1
+  for m in $NESTED_MARKERS; do
+    [ "$first" -eq 1 ] && first=0 || args+=(-o)
+    args+=(-name "$m")
+  done
+  exec nice -n 10 find . '(' "${args[@]}" ')' -print
+}
+
+# "epoch YYYY-MM-DD" for each file argument, one line each, in order. GNU
+# stat and BSD stat disagree on the flags, never on the answer, and one call
+# covers every file.
+nested_mtimes() {
+  if stat -c %Y -- / >/dev/null 2>&1; then
+    stat -c '%Y %y' -- "$@" 2>/dev/null | awk '{ print $1, $2 }'
+  else
+    stat -f '%m %Sm' -t '%Y-%m-%d' -- "$@" 2>/dev/null
+  fi
+}
+
+# First heading plus first prose line, cut near the limit on a word boundary.
+nested_preview() {
+  awk -v max="$NESTED_PREVIEW_CHARS" '
+    function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+    NR == 1 && /^---[ \t]*$/ { fm = 1; next }
+    fm { if (/^---[ \t]*$/) fm = 0; next }
+    /^```/ || /^~~~/ { fence = !fence; next }
+    fence { next }
+    incomment { if (/-->/) incomment = 0; next }
+    /^[ \t]*<!--/ { if (!/-->/) incomment = 1; next }
+    /^[ \t]*$/ || /^@/ || /^[ \t]*\|/ || /^[ \t]*[-*_=]+[ \t]*$/ { next }
+    /^#/ { if (h == "") { h = $0; sub(/^#+[ \t]*/, "", h); h = trim(h) } next }
+    { p = trim($0); sub(/^([-*+>]|[0-9]+\.)[ \t]+/, "", p); exit }
+    END {
+      s = (h != "" ? "\"" h "\"" : "")
+      if (p != "") s = (s != "" ? s " " : "") p
+      if (s == "") s = "(no heading or text)"
+      if (length(s) > max) {
+        s = substr(s, 1, max); cut = s
+        sub(/[ \t][^ \t]*$/, "", cut)
+        if (length(cut) > max - 30) s = cut
+        s = s "..."
+      }
+      print s
+    }' "$1" 2>/dev/null
+}
+
+nested_main() {
+  local cwd budget_ms engine tmp walker timer over=0 secs
+  cwd="$(realdir "${1:-.}")" || return 0
+  [ -d "$cwd" ] || return 0
+
+  budget_ms="${PEEK_NESTED_BUDGET_MS:-1000}"
+  case "$budget_ms" in ''|*[!0-9]*) budget_ms=1000 ;; esac
+  secs="$(awk -v ms="$budget_ms" 'BEGIN { printf "%.3f", ms / 1000 }')"
+
+  engine="${PEEK_NESTED_ENGINE:-}"
+  case "$engine" in
+    rg|find) ;;
+    *) if command -v rg >/dev/null 2>&1; then engine=rg; else engine=find; fi ;;
+  esac
+  [ "$engine" = "rg" ] && ! command -v rg >/dev/null 2>&1 && engine=find
+
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/peek-nested.XXXXXX" 2>/dev/null)" || return 0
+  NESTED_TMP="$tmp"
+  trap 'rm -rf "$NESTED_TMP"' EXIT
+
+  # The walk and its timer. timeout(1) is absent on macOS, so a background
+  # sleeper kills the walk and leaves a marker saying it did. Every background
+  # job gets its own stdio: one left holding the hook's stdout open would make
+  # the harness wait for it.
+  ( cd -- "$cwd" && nested_walk "$engine" ) </dev/null >"$tmp/walk" 2>/dev/null &
+  walker=$!
+  (
+    trap 'kill "$sp" 2>/dev/null; exit 0' TERM
+    sleep "$secs" & sp=$!
+    wait "$sp"
+    : >"$tmp/over"
+    kill -TERM "$walker" 2>/dev/null
+  ) </dev/null >/dev/null 2>&1 &
+  timer=$!
+  wait "$walker" 2>/dev/null
+  kill -TERM "$timer" 2>/dev/null
+  wait "$timer" 2>/dev/null
+  [ -e "$tmp/over" ] && over=1
+
+  # Folders holding a marker, minus the starting folder itself (its contract is
+  # already loaded). A walk cut short may end in half a line; the basename
+  # filter drops it.
+  local dirs
+  dirs="$(awk -v markers="$NESTED_MARKERS" '
+    BEGIN { n = split(markers, m, " "); for (i = 1; i <= n; i++) ok[m[i]] = 1 }
+    { sub(/^\.\//, "")
+      k = split($0, part, "/"); if (!(part[k] in ok)) next
+      if (k == 1) next
+      if (k == 2 && part[1] == ".claude" && part[2] == "CLAUDE.md") next   # loaded too
+      d = substr($0, 1, length($0) - length(part[k]) - 1)
+      if (!(d in seen)) { seen[d] = 1; print d } }' "$tmp/walk" | LC_ALL=C sort)"
+
+  if [ -z "$dirs" ]; then
+    if [ "$over" -eq 1 ]; then
+      printf 'Nested agent context below this directory: the scan ran out of time before it could report anything.\n'
+      printf 'scan incomplete (stopped after %s ms); run peek --nested %s by hand to finish it.\n' "$budget_ms" "$cwd"
+    fi
+    return 0
+  fi
+
+  # Per folder: the file to preview, and whether it sits in a repository of its
+  # own (the folder or an ancestor below the start has a .git).
+  local d p sep src m n=0
+  local -a rec_dir rec_src rec_sep files_git
+  rec_dir=(); rec_src=(); rec_sep=(); files_git=()
+  while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    src=""
+    for m in $NESTED_MARKERS; do
+      [ -f "$cwd/$d/$m" ] && { src="$d/$m"; break; }
+    done
+    [ -n "$src" ] || continue
+    sep=0; p="$d"
+    while [ -n "$p" ] && [ "$p" != "." ]; do
+      [ -e "$cwd/$p/.git" ] && { sep=1; break; }
+      case "$p" in */*) p="${p%/*}" ;; *) p="." ;; esac
+    done
+    rec_dir[$n]="$d"; rec_src[$n]="$src"; rec_sep[$n]="$sep"
+    [ "$sep" -eq 0 ] && files_git+=("$src")
+    n=$((n + 1))
+  done <<EOD
+$dirs
+EOD
+  [ "$n" -gt 0 ] || return 0
+
+  # One git call for every file outside a nested repository. -t marks tracked
+  # files H (or another letter) and untracked ones ?; an ignored file is not
+  # listed at all. Outside a git repository the call fails and every file is
+  # untracked. -z because git quotes a name holding '"' or '\' even with
+  # core.quotepath off, and a quoted name would never match.
+  local ingit=0
+  : >"$tmp/git"
+  if [ ${#files_git[@]} -gt 0 ] && command -v git >/dev/null 2>&1; then
+    git --literal-pathspecs -C "$cwd" ls-files -z -t -c -o --exclude-standard \
+      -- "${files_git[@]}" 2>/dev/null | tr '\0' '\n' >"$tmp/git" && ingit=1
+  fi
+
+  # Absolute paths built one by one: "${a[@]/#/$cwd/}" would turn every "&"
+  # in cwd into the matched text on bash 5.2 and later.
+  local i=0
+  local -a abs
+  abs=()
+  : >"$tmp/pre"
+  while [ "$i" -lt "$n" ]; do
+    printf '%s\t%s\t%s\n' "${rec_sep[$i]}" "${rec_dir[$i]}" "${rec_src[$i]}" >>"$tmp/pre"
+    abs[$i]="$cwd/${rec_src[$i]}"
+    i=$((i + 1))
+  done
+  nested_mtimes "${abs[@]}" >"$tmp/mt"
+
+  # rank, epoch, date, folder, file, tag; then sorted by rank and newest first.
+  awk -v ingit="$ingit" -F '\t' '
+    FILENAME == ARGV[1] { st[substr($0, 3)] = substr($0, 1, 1); next }
+    FILENAME == ARGV[2] { split($0, f, " "); ep[FNR] = f[1]; dt[FNR] = f[2]; next }
+    { e = ep[FNR]; if (e !~ /^[0-9]+$/) e = 0; d = dt[FNR]; if (d == "") d = "unknown date"
+      if ($1 == 1)            { r = 3; t = "separate repo" }
+      else if (ingit == 0)    { r = 1; t = "work in progress (untracked)" }
+      else if (!($3 in st))   { r = 1; t = "work in progress (gitignored)" }
+      else if (st[$3] == "?") { r = 1; t = "work in progress (untracked)" }
+      else                    { r = 2; t = "tracked" }
+      printf "%d\t%s\t%s\t%s\t%s\t%s\n", r, e, d, $2, $3, t }
+  ' "$tmp/git" "$tmp/mt" "$tmp/pre" | LC_ALL=C sort -t "$(printf '\t')" -k1,1n -k2,2nr -k4,4 >"$tmp/rows"
+
+  local total shown=0 rank epoch date dir src tag
+  total="$(awk 'END { print NR }' "$tmp/rows")"
+  [ "$total" -gt 0 ] || return 0
+  printf 'Nested agent context below this directory (preview only):\n'
+  while IFS="$(printf '\t')" read -r rank epoch date dir src tag; do
+    shown=$((shown + 1))
+    [ "$shown" -le "$NESTED_MAX_LINES" ] || break
+    printf -- '- %s · %s · %s · %s\n' "$dir" "$tag" "$date" "$(nested_preview "$cwd/$src")"
+  done <"$tmp/rows"
+  [ "$total" -gt "$NESTED_MAX_LINES" ] && printf '+%d more\n' $((total - NESTED_MAX_LINES))
+  [ "$over" -eq 1 ] && printf 'scan incomplete (stopped after %s ms); more folders may exist below.\n' "$budget_ms"
+  printf 'If one of these relates to this task, run peek <path> before starting new work beside it.\n'
+  return 0
+}
+
 # ------------------------------------------------------------------- main ---
+
+# In a subshell so that any failure inside still ends here, silently, with 0:
+# a hook prints this into every session and must never break one.
+if [ "${1-}" = "--nested" ]; then
+  ( nested_main "${2-}" )
+  exit 0
+fi
+
 
 CALLER_ROOT="$(find_root "$(pwd -P)" 2>/dev/null || true)"
 TOTAL=0; MISSING=0

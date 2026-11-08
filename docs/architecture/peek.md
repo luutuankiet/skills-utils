@@ -1,7 +1,7 @@
 ---
 title: peek
-covers: where peek decides local, ssh or git mode, finds the repository root, resolves @ imports, lists skills, caches clones, or prints the README fallback for a repo with no agent context
-verified: 2026-11-05
+covers: where peek decides local, ssh or git mode, lists nested agent context for the session-start hook, finds the repository root, resolves @ imports, lists skills, caches clones, or prints the README fallback for a repo with no agent context
+verified: 2026-11-08
 ---
 
 # peek
@@ -24,16 +24,18 @@ is piped to the remote host, which may have nothing but bash.
 
 | file | lines | what lives there |
 |---|---|---|
-| `cli/bin/peek.js` | 79-116 | `main`: parse arguments, `detect` each target, sweep expired clones, dispatch per mode |
-| `cli/bin/peek.js` | 50-78 | `peekSsh` (pipe `peek.sh` over `ssh`) and `peekGit` (clone, then run locally) |
+| `cli/bin/peek.js` | 82-121 | `main`: `--nested` goes straight to the script; otherwise parse arguments, `detect` each target, sweep expired clones, dispatch per mode |
+| `cli/bin/peek.js` | 53-81 | `peekSsh` (pipe `peek.sh` over `ssh`) and `peekGit` (clone, then run locally) |
 | `cli/lib/modes.js` | 22-53 | `detect` (local, `host:path` or git URL) and `parseGitUrl`, including GitHub `/tree/<ref>/<subdir>` links |
 | `cli/lib/modes.js` | 54-139 | clone cache under `~/.cache/peek/`: key, TTL (`PEEK_CACHE_DIR`, `PEEK_TTL_MIN`), `sweep`, `ensureClone` |
 | `cli/lib/modes.js` | 140-166 | `sshForm` and `gitClone`: an https clone that is refused is retried as `git@host:owner/repo.git` |
-| `cli/lib/peek.sh` | 24-30 | the one list of vendored and build directories that every scan prunes |
-| `cli/lib/peek.sh` | 45-93 | resolution: `realdir`, `find_root` (nearest contract file wins, git root is the tie-break), `suggest_children` |
-| `cli/lib/peek.sh` | 94-180 | payload: `emit_file` resolves `@` imports with dedupe, `emit_skills` reads skill frontmatter |
-| `cli/lib/peek.sh` | 181-296 | fallback for a repo with no agent context: README head, manifest heads, a two-level tree of tracked files, with secret-shaped names withheld |
-| `cli/lib/peek.sh` | 297-383 | main: per target, find the root, refuse to re-print the caller's own repo, emit or explore |
+| `cli/lib/peek.sh` | 25-31 | the one list of vendored and build directories that every scan prunes |
+| `cli/lib/peek.sh` | 46-94 | resolution: `realdir`, `find_root` (nearest contract file wins, git root is the tie-break), `suggest_children` |
+| `cli/lib/peek.sh` | 95-181 | payload: `emit_file` resolves `@` imports with dedupe, `emit_skills` reads skill frontmatter |
+| `cli/lib/peek.sh` | 182-297 | fallback for a repo with no agent context: README head, manifest heads, a two-level tree of tracked files, with secret-shaped names withheld |
+| `cli/lib/peek.sh` | 298-513 | `--nested`: walk with `rg` or pruned `find` under a background kill timer (`PEEK_NESTED_BUDGET_MS`, `PEEK_NESTED_ENGINE`), one `git ls-files` call for the tags, rank, preview |
+| `hooks/nested-context.mjs` | all | the hook wrapper: reads `cwd` and the event from stdin, runs `peek.sh --nested`, prints hook JSON or nothing |
+| `cli/lib/peek.sh` | 514-608 | main: per target, find the root, refuse to re-print the caller's own repo, emit or explore |
 
 ## Tests
 

@@ -17,6 +17,7 @@ const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'peek.
 const BAR = '━'.repeat(60);
 
 const USAGE = `usage: peek [--ssh | --git] <target> [<target> ...]
+       peek --nested [<dir>]
 
   <target> is one of
     /any/path/inside/a/repo          a file or directory on this machine
@@ -26,6 +27,8 @@ const USAGE = `usage: peek [--ssh | --git] <target> [<target> ...]
     https://github.com/o/r/tree/<ref>/<subdir>
 
   --ssh / --git force the mode for every target after them.
+  --nested lists folders below <dir> (default: here) that hold their own
+  AGENTS.md, CLAUDE.md or CLAUDE.local.md, one preview line each.
   Clones live in ${cacheDir()} and are deleted 30 minutes after their
   last peek, at the start of the next peek run.`;
 
@@ -82,6 +85,9 @@ function main(argv) {
     console.error(USAGE);
     return 2;
   }
+
+  // Local only, one folder: the same listing the session-start hook prints.
+  if (argv[0] === '--nested') return runBash(['--nested', argv[1] || process.cwd()]);
 
   let forced = null;
   const targets = [];

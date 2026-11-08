@@ -23,7 +23,8 @@ packages from the same tree:
 
 ```
 .claude-plugin/plugin.json  plugin manifest, lists shipped skills
-hooks/hooks.json            mcp-piper hooks, run with node
+hooks/hooks.json            mcp-piper hooks and the nested-context hook, run with node
+hooks/nested-context.mjs    session and subagent start: peek.sh --nested as hook JSON
 cli/bin/peek.js             picks local, ssh or git mode
 cli/lib/peek.sh             the peeking itself
 cli/lib/modes.js            target detection, clone cache

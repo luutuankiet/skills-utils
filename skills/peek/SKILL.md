@@ -40,5 +40,16 @@ Read the output, then decide what to open. Relative links in it resolve against
   instead. That is your first exploration already done; don't repeat it with
   `ls`. Files that may hold secrets (`.env*`, keys) are never listed.
 
+**Nested agent context.** A session preloads only its own folder's contract
+files. When a session or subagent starts, the plugin runs
+`peek --nested <cwd>` and, if any folder below holds its own `AGENTS.md`,
+`CLAUDE.md` or `CLAUDE.local.md`, adds a short list: path, whether it is work in
+progress (gitignored or untracked), tracked, or a separate repo, the date it
+last changed, and its first heading and line. Nothing is listed when there is
+nothing nested. It is a preview, not the context: if one of those folders
+relates to your task, peek it before starting new work beside it, because it may
+hold work already done. `scan incomplete` means the one-second scan ran out of
+time and more folders may exist.
+
 The host needs `node` and `bash`. If `npx` itself is missing, say so rather than
 reconstructing the output by hand: a guessed Level 0 is worse than none.

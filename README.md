@@ -54,6 +54,18 @@ way, rooted at the nearest folder holding a README or a manifest. Names that may
 hold key material (`.env*`, `*.pem`, `id_rsa`, anything with secret, token or
 credential in it) are never listed.
 
+**Nested agent context is announced, never loaded.** A session preloads only
+its own folder's contract files, so an `AGENTS.md` one level down, such as a
+gitignored work-in-progress index under `tmp/`, is invisible until the agent
+happens to open a file beside it. `peek --nested <dir>` lists every folder below
+`<dir>` holding an `AGENTS.md`, `CLAUDE.md` or `CLAUDE.local.md`: one line each
+with its path, a tag (work in progress, tracked, or a separate repo), the date
+it last changed and its first heading and line, at most ten lines. The plugin
+runs it on session start (`startup`, `clear`, `compact`) and on every subagent
+start, and prints nothing when there is nothing nested. The scan ignores
+`.gitignore` on purpose, skips vendored and build folders, and stops after one
+second with `scan incomplete`.
+
 Exit `0` when a Level 0 was found *or* confidently absent — absence is an answer,
 not a failure. `2` on a bad argument, `3` when no given path exists at all.
 

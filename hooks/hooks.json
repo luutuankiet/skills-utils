@@ -45,6 +45,16 @@
             "timeout": 120
           }
         ]
+      },
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nested-context.mjs\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SubagentStart": [
@@ -54,6 +64,15 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/piper/bin/mcp-piper.js\" hook subagent-start",
             "timeout": 120
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/nested-context.mjs\"",
+            "timeout": 10
           }
         ]
       }
