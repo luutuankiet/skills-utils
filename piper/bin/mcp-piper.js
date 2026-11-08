@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // Entry point for the mcp-piper hooks and the `doctor` check.
 //
-//   mcp-piper hook pre|post|post-failure|session-start|subagent-start   (stdin: hook JSON)
+//   mcp-piper hook pre|post|post-failure|session-start|subagent-start|messagedisplay   (stdin: hook JSON)
 //   mcp-piper doctor
 //   mcp-piper --version
 //
 // A hook must never break the tool call it watches. Any unexpected error lets
 // the call through untouched, except when the call carries a pointer or
 // `_save_to`: then it is denied, so a literal "@file:" never reaches a server.
+// messagedisplay only changes what is shown on screen; on any error it prints
+// nothing and the original text is shown.
 
 import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync, mkdirSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HANDLERS, deny, involvesPiper, pre } from '../lib/claude.js';
 import { stateDir } from '../lib/core.js';
+import { decodeMermaidUrl, mermaidEnabled, scanDelta, newState } from '../lib/mermaid.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
@@ -114,6 +117,17 @@ function doctor() {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  check('mermaid links', () => {
+    if (!mermaidEnabled()) return { status: 'ok', detail: 'off (MCP_PIPER_MERMAID is set to turn it off)' };
+    const code = 'flowchart LR\n  A --> B';
+    const r = scanDelta(newState(), `\`\`\`mermaid\n${code}\n\`\`\`\n`, true);
+    const m = /\]\((https:\/\/mermaid\.live\/edit#pako:[^)]+)\)/.exec(r.text);
+    const ok = r.changed && m && decodeMermaidUrl(m[1]).code === code;
+    return ok
+      ? { status: 'ok', detail: 'a sample block got a mermaid.live link that decodes back to its text' }
+      : { status: 'fail', detail: `unexpected output: ${JSON.stringify(r.text)}` };
   });
 
   check('state folder writable', () => {

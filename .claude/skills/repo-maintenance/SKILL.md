@@ -37,6 +37,7 @@ it with a new one rather than editing it.
 
 - [Agent context lives in AGENTS.md and docs/, not in the README](../../../docs/adr/0001-agent-context-in-agents-md-and-docs.md)
 - [mcp-piper moves bytes; servers understand formats](../../../docs/adr/0002-mcp-piper-moves-bytes-not-formats.md)
+- [Mermaid diagrams get a display-only editor link, built offline, inside mcp-piper](../../../docs/adr/0003-mermaid-links-are-display-only.md)
 
 <!-- END GENERATED INDEX -->
 

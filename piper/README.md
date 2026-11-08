@@ -98,6 +98,27 @@ When a tool returns base64 or images, add a line such as `With mcp-piper, add "_
 
 When a call has no pointer but pastes a string longer than 20,000 characters, the call goes through unchanged and the agent gets a one-line tip to use `@file:` next time.
 
+## Mermaid links on screen
+
+The plugin also binds Claude Code's `MessageDisplay` hook. Under each
+```` ```mermaid ```` or `~~~mermaid` block in an assistant message, the terminal
+shows one line, `↳ open diagram N`, as a clickable link to the diagram in the
+mermaid.live editor (`https://mermaid.live/edit#pako:...`).
+
+- **Display only.** The line is never written to the transcript and the model
+  never sees it.
+- **Offline.** The diagram text is deflated and base64url-encoded into the URL
+  fragment on your machine. Nothing is uploaded until you open the link, and a
+  URL fragment is not sent to the server even then.
+- **Every block.** Indented fences, tilde fences, several diagrams per message
+  and a block still open when the message ends all get a link. A mermaid fence
+  quoted inside another code block does not.
+- **Off switch.** Set `MCP_PIPER_MERMAID=0` (or `false`, `off`, `no`) in the
+  environment Claude Code runs in.
+- **Terminal.** The label renders as an OSC 8 hyperlink. Inside tmux, the
+  outer terminal needs `set -as terminal-features 'xterm*:hyperlinks'` or
+  tmux drops the link and you see only the label text.
+
 ## Things to know
 
 - Claude Code writes hook output into the session's transcript file on disk. That includes the expanded contents of every pointer, so a secret sent through a pointer lands in that file too. The model never sees it.

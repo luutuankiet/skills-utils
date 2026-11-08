@@ -8,6 +8,7 @@ import {
   normaliseResult, saveResult, buildStub, writeState, readState, deleteState, humanSize,
 } from './core.js';
 import { basename, dirname, isAbsolute, join } from 'node:path';
+import { mermaidEnabled, processBatch } from './mermaid.js';
 
 // ---------------------------------------------------------------- settings ---
 // Three behaviours, each settled by nested Claude Code runs (version 2.1.318).
@@ -215,10 +216,31 @@ export function subagentStart() {
   return { hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: MEMORY_NOTE } };
 }
 
+/**
+ * MessageDisplay: add a mermaid.live link line after each mermaid block, on
+ * screen only. Anything unexpected, including a payload missing a field,
+ * prints nothing, and Claude Code shows the original text.
+ */
+export function messageDisplay(ev, options = {}) {
+  if (!mermaidEnabled()) return null;
+  if (!ev || typeof ev !== 'object') return null;
+  const { message_id: id, index, final, delta } = ev;
+  if (typeof id !== 'string' || !id || !Number.isInteger(index) || index < 0
+    || typeof final !== 'boolean' || typeof delta !== 'string') return null;
+  let text;
+  try {
+    text = processBatch({ id, index, final, delta }, options);
+  } catch {
+    return null;
+  }
+  return text === null ? null : { hookSpecificOutput: { hookEventName: 'MessageDisplay', displayContent: text } };
+}
+
 export const HANDLERS = {
   pre,
   post,
   'post-failure': failure,
   'session-start': sessionStart,
   'subagent-start': subagentStart,
+  messagedisplay: messageDisplay,
 };

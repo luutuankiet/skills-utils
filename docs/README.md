@@ -15,7 +15,7 @@ something is implemented.
 
 | page | covers | verified |
 |---|---|---|
-| [mcp-piper](architecture/mcp-piper.md) | where mcp-piper expands @file pointers, handles _save_to, saves a tool result and builds the stub, carries state between the pre and post hooks, wires the Claude Code hooks, and runs doctor or the nested lab tests | 2026-11-05 |
+| [mcp-piper](architecture/mcp-piper.md) | where mcp-piper expands @file pointers, handles _save_to, saves a tool result and builds the stub, carries state between the pre and post hooks, adds mermaid.live links under mermaid blocks on screen, wires the Claude Code hooks, and runs doctor or the nested lab tests | 2026-11-08 |
 | [peek](architecture/peek.md) | where peek decides local, ssh or git mode, finds the repository root, resolves @ imports, lists skills, caches clones, or prints the README fallback for a repo with no agent context | 2026-11-05 |
 
 ## Traps
@@ -39,5 +39,6 @@ it with a new one rather than editing it.
 
 - [Agent context lives in AGENTS.md and docs/, not in the README](adr/0001-agent-context-in-agents-md-and-docs.md)
 - [mcp-piper moves bytes; servers understand formats](adr/0002-mcp-piper-moves-bytes-not-formats.md)
+- [Mermaid diagrams get a display-only editor link, built offline, inside mcp-piper](adr/0003-mermaid-links-are-display-only.md)
 
 <!-- END GENERATED INDEX -->

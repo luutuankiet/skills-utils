@@ -57,6 +57,17 @@
           }
         ]
       }
+    ],
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/piper/bin/mcp-piper.js\" hook messagedisplay",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

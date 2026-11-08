@@ -146,6 +146,17 @@ A refused call never reaches the server. The reason starts with `mcp-piper:`.
 
 If you meant the literal text `@file:...`, write `@@file:...` instead.
 
+## Mermaid links on screen
+
+Under every ```` ```mermaid ```` (or `~~~mermaid`) block in your messages, the
+user sees one extra line, `↳ open diagram N`, linking to the diagram in the
+mermaid.live editor. You need to do nothing for it, and you never see it: the
+line is added to the screen only, never to the transcript or your context. Do
+not write such a line yourself, and do not paste mermaid.live URLs to stand in
+for it. The link is built on the user's machine; the diagram text travels in
+the URL fragment and is not uploaded. The user turns it off with
+`MCP_PIPER_MERMAID=0`.
+
 ## Privacy
 
 Claude Code writes hook output into the session's transcript file on disk. The

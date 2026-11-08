@@ -79,6 +79,10 @@ the server:
 - **Download.** A top-level `"_save_to": "<path>"` is removed before the server
   sees the call; the result is saved to that path (images to files beside it)
   and the agent gets a short stub with paths, sizes and hashes instead.
+- **Mermaid links.** A display-only hook adds `↳ open diagram N` under every
+  mermaid block in an assistant message, linking to the diagram in the
+  mermaid.live editor. The model never sees it; `MCP_PIPER_MERMAID=0` turns
+  it off.
 
 Both are opt-in per call; a call with neither runs untouched. A pointer to a
 missing file, a folder or an unreadable file, and a `_save_to` that cannot be

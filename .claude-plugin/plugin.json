@@ -1,6 +1,6 @@
 {
   "name": "skills-utils",
-  "description": "Small agent-facing utilities. peek loads another repository's always-on context without a session being spawned inside it. mcp-piper adds hooks to every MCP tool call so an agent can send a file on disk as an argument (\"@file:<path>\") and save a result to disk (\"_save_to\") without the bytes entering its context.",
+  "description": "Small agent-facing utilities. peek loads another repository's always-on context without a session being spawned inside it. mcp-piper adds hooks to every MCP tool call so an agent can send a file on disk as an argument (\"@file:<path>\") and save a result to disk (\"_save_to\") without the bytes entering its context, and shows a mermaid.live link under every mermaid diagram on screen.",
   "author": {
     "name": "luutuankiet",
     "url": "https://github.com/luutuankiet"
