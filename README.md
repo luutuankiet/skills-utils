@@ -59,8 +59,13 @@ its own folder's contract files, so an `AGENTS.md` one level down, such as a
 gitignored work-in-progress index under `tmp/`, is invisible until the agent
 happens to open a file beside it. `peek --nested <dir>` lists every folder below
 `<dir>` holding an `AGENTS.md`, `CLAUDE.md` or `CLAUDE.local.md`: one line each
-with its path, a tag (work in progress, tracked, or a separate repo), the date
-it last changed and its first heading and line, at most ten lines. The plugin
+with its path, a tag (private project, work in progress, tracked, or a separate
+repo), the date it last changed and its first heading and line, at most ten
+lines. A private project is a folder directly inside `tmp/projects/` that holds
+one of those files: unpublished work kept like a small repository. Private
+projects are listed first, what lies deeper inside one is left out, and one
+closing sentence reminds the agent to peek the project and keep its docs
+current. `PEEK_NESTED_PRIORITY` names a different folder. The plugin
 runs it on session start (`startup`, `clear`, `compact`) and on every subagent
 start, and prints nothing when there is nothing nested. The scan ignores
 `.gitignore` on purpose, skips vendored and build folders, and stops after one

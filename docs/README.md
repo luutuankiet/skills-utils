@@ -16,7 +16,7 @@ something is implemented.
 | page | covers | verified |
 |---|---|---|
 | [mcp-piper](architecture/mcp-piper.md) | where mcp-piper expands @file pointers, handles _save_to, saves a tool result and builds the stub, carries state between the pre and post hooks, adds mermaid.live links under mermaid blocks on screen, wires the Claude Code hooks, and runs doctor or the nested lab tests | 2026-11-08 |
-| [peek](architecture/peek.md) | where peek decides local, ssh or git mode, lists nested agent context for the session-start hook, finds the repository root, resolves @ imports, lists skills, caches clones, or prints the README fallback for a repo with no agent context | 2026-11-08 |
+| [peek](architecture/peek.md) | where peek decides local, ssh or git mode, lists nested agent context for the session-start hook, finds the repository root, resolves @ imports, lists skills, caches clones, or prints the README fallback for a repo with no agent context | 2026-11-10 |
 
 ## Traps
 

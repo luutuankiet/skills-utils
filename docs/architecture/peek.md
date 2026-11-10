@@ -1,7 +1,7 @@
 ---
 title: peek
 covers: where peek decides local, ssh or git mode, lists nested agent context for the session-start hook, finds the repository root, resolves @ imports, lists skills, caches clones, or prints the README fallback for a repo with no agent context
-verified: 2026-11-08
+verified: 2026-11-10
 ---
 
 # peek
@@ -33,14 +33,16 @@ is piped to the remote host, which may have nothing but bash.
 | `cli/lib/peek.sh` | 46-94 | resolution: `realdir`, `find_root` (nearest contract file wins, git root is the tie-break), `suggest_children` |
 | `cli/lib/peek.sh` | 95-181 | payload: `emit_file` resolves `@` imports with dedupe, `emit_skills` reads skill frontmatter |
 | `cli/lib/peek.sh` | 182-297 | fallback for a repo with no agent context: README head, manifest heads, a two-level tree of tracked files, with secret-shaped names withheld |
-| `cli/lib/peek.sh` | 298-513 | `--nested`: walk with `rg` or pruned `find` under a background kill timer (`PEEK_NESTED_BUDGET_MS`, `PEEK_NESTED_ENGINE`), one `git ls-files` call for the tags, rank, preview |
+| `cli/lib/peek.sh` | 298-556 | `--nested`: walk with `rg` or pruned `find` under a background kill timer (`PEEK_NESTED_BUDGET_MS`, `PEEK_NESTED_ENGINE`), one `git ls-files` call for the tags, rank, preview |
+| `cli/lib/peek.sh` | 314-324 | the priority folder (`tmp/projects`, or `PEEK_NESTED_PRIORITY`): a folder directly inside it that holds a marker is a `private project`, ranked above everything else, and markers deeper inside it are dropped at 436-460 before anything is counted |
 | `hooks/nested-context.mjs` | all | the hook wrapper: reads `cwd` and the event from stdin, runs `peek.sh --nested`, prints hook JSON or nothing |
-| `cli/lib/peek.sh` | 514-608 | main: per target, find the root, refuse to re-print the caller's own repo, emit or explore |
+| `cli/lib/peek.sh` | 557-651 | main: per target, find the root, refuse to re-print the caller's own repo, emit or explore |
 
 ## Tests
 
 `cli/test/modes.test.js` covers the Node layer; `cli/test/local.test.js` runs
-`bin/peek.js` end to end against fixture folders it builds in a temp directory. Run `npm test` from `cli/`.
+`bin/peek.js` end to end against fixture folders it builds in a temp directory; `cli/test/nested.test.js` does
+the same for `--nested` and the hook wrapper, with both walk engines. Run `npm test` from `cli/`.
 
 ## The rule
 

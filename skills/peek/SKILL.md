@@ -51,5 +51,11 @@ relates to your task, peek it before starting new work beside it, because it may
 hold work already done. `scan incomplete` means the one-second scan ran out of
 time and more folders may exist.
 
+A line tagged `private project` is a folder directly inside `tmp/projects/`:
+unpublished work kept like a small repository. These come first in the list, and
+whatever lies deeper inside one is not listed. Treat a private project like a
+repository: peek it before working in it, then keep its docs current as you
+work. `PEEK_NESTED_PRIORITY` names a different folder than `tmp/projects`.
+
 The host needs `node` and `bash`. If `npx` itself is missing, say so rather than
 reconstructing the output by hand: a guessed Level 0 is worse than none.

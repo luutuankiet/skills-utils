@@ -311,6 +311,18 @@ NESTED_MARKERS="AGENTS.md CLAUDE.md CLAUDE.local.md"
 NESTED_MAX_LINES=10
 NESTED_PREVIEW_CHARS=120
 
+# The priority folder, relative to the scanned directory (PEEK_NESTED_PRIORITY
+# overrides it). Each folder directly inside it that holds a marker is a
+# private project: work in progress that is not ready to be published, kept in
+# a plain folder laid out like a small repository. A new session has no other
+# way to learn that such a project exists, and it is the context most likely to
+# matter, so these folders take the first lines of the list, above ordinary
+# work in progress, and keep that place even when they hold a .git of their
+# own. Markers deeper inside a project are left out, and out of the "+N more"
+# count: peeking the project reveals them, and listing them here would spend
+# the ten lines on one project's internals.
+NESTED_PRIORITY_DEFAULT="tmp/projects"
+
 # The marker files, relative to the current directory, one per line. One
 # process only, so the caller's kill timer stops the whole walk. .gitignore is
 # deliberately not honoured: gitignored work in progress is the main case.
@@ -389,6 +401,15 @@ nested_main() {
   esac
   [ "$engine" = "rg" ] && ! command -v rg >/dev/null 2>&1 && engine=find
 
+  local prio="${PEEK_NESTED_PRIORITY:-$NESTED_PRIORITY_DEFAULT}"
+  while :; do
+    case "$prio" in
+      ./*) prio="${prio#./}" ;;
+      */)  prio="${prio%/}" ;;
+      *)   break ;;
+    esac
+  done
+
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/peek-nested.XXXXXX" 2>/dev/null)" || return 0
   NESTED_TMP="$tmp"
   trap 'rm -rf "$NESTED_TMP"' EXIT
@@ -414,16 +435,28 @@ nested_main() {
 
   # Folders holding a marker, minus the starting folder itself (its contract is
   # already loaded). A walk cut short may end in half a line; the basename
-  # filter drops it.
+  # filter drops it. A folder below a private project is dropped as well; the
+  # project is known only once the whole walk is read, so that waits for END.
+  # The priority folder goes in through the environment because -v would
+  # rewrite a backslash in it.
   local dirs
-  dirs="$(awk -v markers="$NESTED_MARKERS" '
-    BEGIN { n = split(markers, m, " "); for (i = 1; i <= n; i++) ok[m[i]] = 1 }
+  dirs="$(PEEK_PRIO="$prio" awk -v markers="$NESTED_MARKERS" '
+    BEGIN { n = split(markers, m, " "); for (i = 1; i <= n; i++) ok[m[i]] = 1
+            pre = ENVIRON["PEEK_PRIO"]; if (pre != "") pre = pre "/"; plen = length(pre) }
     { sub(/^\.\//, "")
       k = split($0, part, "/"); if (!(part[k] in ok)) next
       if (k == 1) next
       if (k == 2 && part[1] == ".claude" && part[2] == "CLAUDE.md") next   # loaded too
       d = substr($0, 1, length($0) - length(part[k]) - 1)
-      if (!(d in seen)) { seen[d] = 1; print d } }' "$tmp/walk" | LC_ALL=C sort)"
+      if (d in seen) next
+      seen[d] = 1; list[++cnt] = d; own[d] = ""
+      if (plen && substr(d, 1, plen) == pre) {
+        rest = substr(d, plen + 1); cut = index(rest, "/")
+        if (cut == 0) project[d] = 1
+        else own[d] = pre substr(rest, 1, cut - 1)
+      } }
+    END { for (i = 1; i <= cnt; i++) if (!(own[list[i]] in project)) print list[i] }
+  ' "$tmp/walk" | LC_ALL=C sort)"
 
   if [ -z "$dirs" ]; then
     if [ "$over" -eq 1 ]; then
@@ -433,8 +466,10 @@ nested_main() {
     return 0
   fi
 
-  # Per folder: the file to preview, and whether it sits in a repository of its
-  # own (the folder or an ancestor below the start has a .git).
+  # Per folder: the file to preview, and its kind: 2 for a private project,
+  # 1 when it sits in a repository of its own (the folder or an ancestor below
+  # the start has a .git), 0 otherwise. The project test comes first, so a
+  # project with a .git is still a project.
   local d p sep src m n=0
   local -a rec_dir rec_src rec_sep files_git
   rec_dir=(); rec_src=(); rec_sep=(); files_git=()
@@ -446,6 +481,11 @@ nested_main() {
     done
     [ -n "$src" ] || continue
     sep=0; p="$d"
+    if [ -n "$prio" ]; then
+      case "$d" in
+        "$prio"/*) case "${d:$(( ${#prio} + 1 ))}" in */*) ;; *) sep=2; p="." ;; esac ;;
+      esac
+    fi
     while [ -n "$p" ] && [ "$p" != "." ]; do
       [ -e "$cwd/$p/.git" ] && { sep=1; break; }
       case "$p" in */*) p="${p%/*}" ;; *) p="." ;; esac
@@ -488,7 +528,8 @@ EOD
     FILENAME == ARGV[1] { st[substr($0, 3)] = substr($0, 1, 1); next }
     FILENAME == ARGV[2] { split($0, f, " "); ep[FNR] = f[1]; dt[FNR] = f[2]; next }
     { e = ep[FNR]; if (e !~ /^[0-9]+$/) e = 0; d = dt[FNR]; if (d == "") d = "unknown date"
-      if ($1 == 1)            { r = 3; t = "separate repo" }
+      if ($1 == 2)            { r = 0; t = "private project" }
+      else if ($1 == 1)       { r = 3; t = "separate repo" }
       else if (ingit == 0)    { r = 1; t = "work in progress (untracked)" }
       else if (!($3 in st))   { r = 1; t = "work in progress (gitignored)" }
       else if (st[$3] == "?") { r = 1; t = "work in progress (untracked)" }
@@ -496,18 +537,20 @@ EOD
       printf "%d\t%s\t%s\t%s\t%s\t%s\n", r, e, d, $2, $3, t }
   ' "$tmp/git" "$tmp/mt" "$tmp/pre" | LC_ALL=C sort -t "$(printf '\t')" -k1,1n -k2,2nr -k4,4 >"$tmp/rows"
 
-  local total shown=0 rank epoch date dir src tag
+  local total shown=0 projects=0 rank epoch date dir src tag
   total="$(awk 'END { print NR }' "$tmp/rows")"
   [ "$total" -gt 0 ] || return 0
   printf 'Nested agent context below this directory (preview only):\n'
   while IFS="$(printf '\t')" read -r rank epoch date dir src tag; do
     shown=$((shown + 1))
     [ "$shown" -le "$NESTED_MAX_LINES" ] || break
+    [ "$rank" -eq 0 ] && projects=1
     printf -- '- %s · %s · %s · %s\n' "$dir" "$tag" "$date" "$(nested_preview "$cwd/$src")"
   done <"$tmp/rows"
   [ "$total" -gt "$NESTED_MAX_LINES" ] && printf '+%d more\n' $((total - NESTED_MAX_LINES))
   [ "$over" -eq 1 ] && printf 'scan incomplete (stopped after %s ms); more folders may exist below.\n' "$budget_ms"
   printf 'If one of these relates to this task, run peek <path> before starting new work beside it.\n'
+  [ "$projects" -eq 1 ] && printf 'A private project is maintained like a repository: run peek on it first, then keep its docs current as you work in it.\n'
   return 0
 }
 
