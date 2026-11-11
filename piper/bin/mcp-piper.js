@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { HANDLERS, deny, involvesPiper, pre } from '../lib/claude.js';
 import { stateDir } from '../lib/core.js';
 import { decodeMermaidUrl, mermaidEnabled, scanDelta, newState } from '../lib/mermaid.js';
+import { handlePre, stagingRoot } from '../lib/abs.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
@@ -114,6 +115,28 @@ function doctor() {
       return ok
         ? { status: 'ok', detail: 'text, base64 and escape all expanded as expected' }
         : { status: 'fail', detail: `unexpected hook output: ${JSON.stringify(out)}` };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  check('staging paths', () => {
+    const p = pluginHookFile();
+    const wired = p && readFileSync(p, 'utf8').includes('piper/bin/abs-hook.js');
+    const dir = mkdtempSync(join(tmpdir(), 'mcp-piper-doctor-abs-'));
+    try {
+      const root = join(dir, 'stage');
+      const target = join(dir, 'real', 'sample.txt');
+      mkdirSync(dirname(target), { recursive: true });
+      const text = `doctor staging ${Date.now()}`;
+      writeFileSync(target, text);
+      const staged = `${root}${target}`;
+      handlePre({ tool_name: 'Read', cwd: dir, tool_input: { file_path: staged } }, { PIPER_ABS_ROOT: root });
+      const copied = existsSync(staged) && readFileSync(staged, 'utf8') === text;
+      if (!copied) return { status: 'fail', detail: 'a Read of a staging path did not copy the real file into staging' };
+      return wired
+        ? { status: 'ok', detail: `hook wired; staging root ${stagingRoot()}` }
+        : { status: 'warn', detail: 'a staging Read works, but no abs-hook.js entry was found in hooks/hooks.json' };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

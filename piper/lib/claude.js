@@ -9,6 +9,8 @@ import {
 } from './core.js';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { mermaidEnabled, processBatch } from './mermaid.js';
+import { absHint, stagingRoot } from './abs.js';
+import { inLinkedWorktree } from './worktree.js';
 
 // ---------------------------------------------------------------- settings ---
 // Three behaviours, each settled by nested Claude Code runs (version 2.1.318).
@@ -208,12 +210,25 @@ export function failure(ev) {
   return null;
 }
 
-export function sessionStart() {
-  return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: MEMORY_NOTE } };
+/**
+ * The start-of-session note. Inside a linked git worktree, Claude Code refuses
+ * writes outside it, so the note adds the staging-path hint on its own lines.
+ */
+export function startNote(ev) {
+  try {
+    if (!inLinkedWorktree(ev && ev.cwd)) return MEMORY_NOTE;
+    return `${MEMORY_NOTE}\n${absHint(stagingRoot(process.env))}`;
+  } catch {
+    return MEMORY_NOTE;
+  }
 }
 
-export function subagentStart() {
-  return { hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: MEMORY_NOTE } };
+export function sessionStart(ev) {
+  return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: startNote(ev) } };
+}
+
+export function subagentStart(ev) {
+  return { hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext: startNote(ev) } };
 }
 
 /**

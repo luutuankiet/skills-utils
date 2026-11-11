@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import {
   DECISION_WHEN_CHANGED, NUDGE_ROUTE, SAVE_ERROR_RESULTS,
 } from '../lib/claude.js';
 import { NUDGE_TEXT } from '../lib/core.js';
+import { absHint, stagingRoot } from '../lib/abs.js';
 
 const bin = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'mcp-piper.js');
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -391,4 +392,30 @@ test('doctor passes its checks on this machine', () => {
 test('unknown hook event exits 2', () => {
   const res = spawnSync(process.execPath, [bin, 'hook', 'nope'], { input: '{}', encoding: 'utf8' });
   assert.equal(res.status, 2);
+});
+
+test('session-start and subagent-start add the staging hint only inside a linked worktree', { skip: spawnSync('git', ['--version']).status !== 0 && 'git not installed' }, () => {
+  const { state } = setup();
+  const base = mkdtempSync(join(tmpdir(), 'piper-cc-wt-'));
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
+  const git = (cwd, ...args) => assert.equal(spawnSync('git', args, { cwd, env }).status, 0, `git ${args.join(' ')}`);
+  try {
+    const repo = join(base, 'repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-q');
+    git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+    const wt = join(base, 'wt');
+    git(repo, 'worktree', 'add', '-q', wt);
+    for (const [event, name] of [['session-start', 'SessionStart'], ['subagent-start', 'SubagentStart']]) {
+      const inWt = hook(event, { hook_event_name: name, cwd: wt }, state).out.hookSpecificOutput.additionalContext;
+      assert.equal(inWt, `${MEMORY_NOTE}\n${absHint(stagingRoot(process.env))}`);
+      for (const cwd of [repo, base, undefined]) {
+        const plain = hook(event, { hook_event_name: name, cwd }, state).out.hookSpecificOutput.additionalContext;
+        assert.equal(plain, MEMORY_NOTE, `${event} at ${cwd}`);
+      }
+    }
+    git(repo, 'worktree', 'remove', '--force', wt);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });

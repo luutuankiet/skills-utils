@@ -10,6 +10,16 @@
             "timeout": 120
           }
         ]
+      },
+      {
+        "matcher": "Read|Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/piper/bin/abs-hook.js\" pre",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -22,6 +32,16 @@
             "timeout": 120
           }
         ]
+      },
+      {
+        "matcher": "Read|Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/piper/bin/abs-hook.js\" post",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -32,6 +52,16 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/piper/bin/mcp-piper.js\" hook post-failure",
             "timeout": 120
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/piper/bin/abs-hook.js\" post-failure",
+            "timeout": 10
           }
         ]
       }
