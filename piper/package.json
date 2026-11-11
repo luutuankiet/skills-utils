@@ -1,6 +1,6 @@
 {
   "name": "@luutuankiet/mcp-piper",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Pipe large files between local disk and MCP tool calls without the bytes passing through the agent's context",
   "keywords": [
     "mcp",
