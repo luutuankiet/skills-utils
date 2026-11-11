@@ -1,7 +1,7 @@
 ---
 title: mcp-piper
-covers: where mcp-piper expands @file pointers, handles _save_to, saves a tool result and builds the stub, carries state between the pre and post hooks, adds mermaid.live links under mermaid blocks on screen, wires the Claude Code hooks, and runs doctor or the nested lab tests
-verified: 2026-11-08
+covers: where mcp-piper expands @file pointers, routes worktree agents' Read, Write, Edit and Bash through ~/.piper/abs staging paths, handles _save_to, saves a tool result and builds the stub, carries state between the pre and post hooks, adds mermaid.live links under mermaid blocks on screen, wires the Claude Code hooks, and runs doctor or the nested lab tests
+verified: 2026-11-11
 ---
 
 # mcp-piper
@@ -57,6 +57,29 @@ here and re-date the page.
    delta's line endings, so a delta ending in a newline is replaced by text
    ending in one.
 
+## The path of one staging call (worktree writes)
+
+A worktree-isolated agent is refused Write and Edit on the main checkout and on
+other worktrees. `~/.piper/abs/<absolute path>` (root moved by
+`PIPER_ABS_ROOT`) stands for `<absolute path>`; the decision record
+`docs/adr/0004-worktree-writes-go-through-a-full-path-staging-folder.md` says why.
+
+1. `hooks/hooks.json` runs `node "${CLAUDE_PLUGIN_ROOT}/piper/bin/abs-hook.js" pre|post`
+   on `PreToolUse` and `PostToolUse` for `Read|Write|Edit|Bash`.
+2. `abs-hook.js` reads stdin as text and exits with no output unless it
+   contains `.piper/abs` (or the last folder name of `PIPER_ABS_ROOT`); only
+   then does it load `piper/lib/abs.js`, check the full root spellings and
+   parse JSON. A plain call costs about 0.5 ms over node start-up.
+3. Read, pre: copy the target into staging (or remove a stale staging copy
+   when the target is gone). Write, post: copy staging to the target, creating
+   folders. Edit, pre: deny unless `old_string` applies to the current target;
+   touch nothing. Edit, post: apply the same replacement to the target, then
+   copy the target to staging only if they differ. Bash, pre: rewrite staging
+   paths in the command through `updatedInput`.
+4. No handler sends `permissionDecision: allow`; the user's rules decide.
+5. `sessionStart` / `subagentStart` in `claude.js` add `absHint` after the
+   session note when `inLinkedWorktree(ev.cwd)` is true.
+
 ## Where things live
 
 | file | lines | what lives there |
@@ -78,6 +101,12 @@ here and re-date the page.
 | `piper/lib/core.js` | 463-613 | `saveResult` (text, images, audio, resources; the whole write plan checked before the first write; `opts.trusted`, `opts.server`) |
 | `piper/lib/core.js` | 615-620 | `buildStub` |
 | `piper/lib/core.js` | 622-658 | state files under `MCP_PIPER_STATE_DIR` or the system temp folder, swept after 24 hours |
+| `piper/bin/abs-hook.js` | 1-95 | staging hook entry: the cheap raw-text marker check, lazy load of `abs.js`, and its error rule (deny in pre, stderr in post, always exit 0) |
+| `piper/lib/abs.js` | 21-84 | `AbsError`, `stagingRoot`, `rootMarkers`, `toTarget` (refuses the root itself, `..` and any `.git` segment) and `toStaging` |
+| `piper/lib/abs.js` | 86-150 | `checkEdit` (unique or `replace_all`, CRLF files, no regex), `rewriteCommand` for Bash, and the hint text `absHint` |
+| `piper/lib/abs.js` | 152-300 | `handlePre` and `handlePost`: the per-tool table above, why no allow is sent, and why staging is copied only when it differs |
+| `piper/lib/worktree.js` | 1-40 | `inLinkedWorktree`: walks up to `.git` with no subprocess; a file pointing into `.git/worktrees/<name>` counts, a submodule does not |
+| `piper/lib/claude.js` | 217-232 | `startNote`: the session note plus the staging hint inside a linked worktree |
 | `piper/lib/mermaid.js` | 18-51 | `MCP_PIPER_MERMAID` and `MCP_PIPER_MERMAID_WAIT_MS`, `mermaidLiveUrl` (JSON, zlib level 9, base64url without padding) and `decodeMermaidUrl` |
 | `piper/lib/mermaid.js` | 53-146 | the fence scanner: `scanLine` tracks fences of every language so a mermaid opener inside a `markdown` fence is content, `closeFence` links a non-empty body, `scanDelta` inserts links per batch, carries a stray partial line, and links a fence still open at `final` |
 | `piper/lib/mermaid.js` | 148-203 | per-batch state files under `<state dir>/mermaid/`: `takePrevState` (wait, read, delete, `{lost: true}` on timeout), `putState` (temp file, then rename), `sweepMermaidState` (24 hours, run on batch 0 only) |
@@ -93,8 +122,9 @@ next to it.
 
 ## Tests
 
-- `cd piper && npm test` runs `test/core.test.js`, `test/claude.test.js` and
-  `test/mermaid.test.js` only; the mermaid tests spawn the real bin, including
+- `cd piper && npm test` runs every `test/*.test.js` (core, claude, mermaid,
+  abs, abs-hook, worktree); abs-hook and worktree spawn the real bin and real
+  `git worktree add` folders; the mermaid tests spawn the real bin, including
   two concurrent batches finishing out of order.
   The script names `test/*.test.js` on purpose so the lab runs below are never
   picked up.

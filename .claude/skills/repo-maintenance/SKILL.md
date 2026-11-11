@@ -22,7 +22,9 @@ Failure modes that produce no error message, indexed by the symptom you
 would observe. Read before debugging behaviour that is wrong but not
 crashing.
 
-_No pages yet._
+| symptom | page | area | verified |
+|---|---|---|---|
+| an Edit on a ~/.piper/abs staging path fails with "File content has changed since it was last read", although the agent did not touch the file | [edit-on-staging-path-changed-since-read](../../../docs/traps/edit-on-staging-path-changed-since-read.md) | mcp-piper | 2026-11-11 |
 
 ## Reference
 
@@ -38,6 +40,7 @@ it with a new one rather than editing it.
 - [Agent context lives in AGENTS.md and docs/, not in the README](../../../docs/adr/0001-agent-context-in-agents-md-and-docs.md)
 - [mcp-piper moves bytes; servers understand formats](../../../docs/adr/0002-mcp-piper-moves-bytes-not-formats.md)
 - [Mermaid diagrams get a display-only editor link, built offline, inside mcp-piper](../../../docs/adr/0003-mermaid-links-are-display-only.md)
+- [Worktree agents write elsewhere through a full-path staging folder, with Edit replayed](../../../docs/adr/0004-worktree-writes-go-through-a-full-path-staging-folder.md)
 
 <!-- END GENERATED INDEX -->
 

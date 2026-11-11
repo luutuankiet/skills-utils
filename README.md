@@ -85,7 +85,7 @@ disk, it pastes the whole file into the tool call. To keep a large or binary
 result, it reads the whole result first. Both put bytes into the context that
 the agent never needed to see.
 
-mcp-piper is a pair of Claude Code hooks on every MCP tool (`mcp__.*`) that
+mcp-piper is a set of Claude Code hooks on every MCP tool (`mcp__.*`) that
 removes both, for any server, claude.ai connectors included, with no change to
 the server:
 
@@ -100,6 +100,15 @@ the server:
   mermaid block in an assistant message, linking to the diagram in the
   mermaid.live editor. The model never sees it; `MCP_PIPER_MERMAID=0` turns
   it off.
+- **Worktree writes.** An agent isolated in a git worktree is refused Write
+  and Edit on the main checkout and on other worktrees. Through
+  `~/.piper/abs/<absolute path>` it can Read, Edit and Write any such file:
+  piper copies the file in on Read, replays each Edit onto the real file (so a
+  change someone else made in between survives) and copies Writes out. Bash
+  commands naming a staging path run on the real path. Agents in a worktree
+  get a two-line hint at start. Outside bypass mode, allow
+  `Read(~/.piper/abs/**)` and `Edit(~/.piper/abs/**)`; piper never grants
+  permission itself.
 
 Both are opt-in per call; a call with neither runs untouched. A pointer to a
 missing file, a folder or an unreadable file, and a `_save_to` that cannot be

@@ -119,6 +119,35 @@ mermaid.live editor (`https://mermaid.live/edit#pako:...`).
   outer terminal needs `set -as terminal-features 'xterm*:hyperlinks'` or
   tmux drops the link and you see only the label text.
 
+## Worktree writes: `~/.piper/abs`
+
+Claude Code refuses Write and Edit from an agent isolated in a git worktree (a
+subagent with worktree isolation, or `claude --worktree`) when the file is in
+the main checkout or in another worktree. Paths outside the repo are allowed,
+so mcp-piper offers one: `~/.piper/abs/<absolute path>` stands for
+`<absolute path>`.
+
+```
+Read  ~/.piper/abs/home/me/repo/tmp/board.md    copies the real file in first
+Edit  ~/.piper/abs/home/me/repo/tmp/board.md    replays the edit on the real file
+Write ~/.piper/abs/home/me/repo/reports/a.md    copies out, creating folders
+Bash  cat ~/.piper/abs/home/me/repo/tmp/x.md    runs on /home/me/repo/tmp/x.md
+```
+
+- Read the file through the staging path before you Edit it. An Edit whose
+  text is no longer in the real file is denied with a reason telling you to
+  Read again; a change someone else made elsewhere in the file is kept.
+- Any absolute path works except one with a `.git` or `..` segment.
+  `PIPER_ABS_ROOT` moves the root.
+- A session or subagent started inside a linked worktree gets a two-line hint
+  about this at start.
+- mcp-piper never grants permission. Outside bypass mode, add these allow
+  rules (the Edit rule covers Write too):
+
+```json
+{ "permissions": { "allow": ["Read(~/.piper/abs/**)", "Edit(~/.piper/abs/**)"] } }
+```
+
 ## Things to know
 
 - Claude Code writes hook output into the session's transcript file on disk. That includes the expanded contents of every pointer, so a secret sent through a pointer lands in that file too. The model never sees it.
