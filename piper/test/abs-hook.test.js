@@ -47,7 +47,6 @@ test('abs-hook: garbage, empty stdin and an unknown event all exit 0', () => {
   try {
     assert.equal(run('pre', `{not json ${t.root}`, t.root).stdout, '');
     assert.equal(run('pre', '', t.root).stdout, '');
-    assert.equal(run('post-failure', 'isolated in the worktree {{{', t.root).stdout, '');
     const r = run('nope', '{}', t.root);
     assert.equal(r.stdout, '');
     assert.match(r.stderr, /unknown event/);
@@ -81,45 +80,12 @@ test('abs-hook: a staging Write is copied to the real path after the call', () =
   } finally { t.done(); }
 });
 
-test('abs-hook post-failure: the worktree guard text gets the matching staging path', () => {
-  const t = setup();
-  try {
-    const target = '/home/someone/repo/tmp/board.md';
-    const ev = (tool_name, error) => ({
-      hook_event_name: 'PostToolUseFailure', tool_name, cwd: t.work,
-      tool_input: { file_path: target }, error,
-    });
-    const guard = '<tool_use_error>This agent is isolated in the worktree /w/agent-1. Edit the worktree copy of this file instead of the shared-checkout path.</tool_use_error>';
-    const r = run('post-failure', ev('Edit', guard), t.root);
-    assert.equal(r.out.hookSpecificOutput.hookEventName, 'PostToolUseFailure');
-    assert.ok(r.out.hookSpecificOutput.additionalContext.includes(`${t.root}${target}`));
-    assert.ok(r.out.hookSpecificOutput.additionalContext.startsWith('mcp-piper:'));
-
-    const sib = 'This agent is isolated in the worktree /w/a, so its writes are limited to that folder. This path is in a different worktree (/w/b).';
-    assert.ok(run('post-failure', ev('Write', sib), t.root).out);
-    const sess = 'This session is isolated in the worktree /w/s. Edit the worktree copy of this file instead of the shared-checkout path.';
-    assert.ok(run('post-failure', ev('Write', sess), t.root).out);
-    // Read from tool_response as well, in case the error text lands there.
-    const viaResp = { ...ev('Write', undefined), tool_response: guard };
-    assert.ok(run('post-failure', viaResp, t.root).out);
-
-    // Other failures, other tools, .git targets and staging targets get nothing.
-    assert.equal(run('post-failure', ev('Edit', 'old_string not found'), t.root).stdout, '');
-    assert.equal(run('post-failure', ev('Bash', guard), t.root).stdout, '');
-    const gitEv = { ...ev('Write', guard), tool_input: { file_path: '/home/someone/repo/.git/info/x' } };
-    assert.equal(run('post-failure', gitEv, t.root).stdout, '');
-    const stagedEv = { ...ev('Write', guard), tool_input: { file_path: `${t.root}/x/y` } };
-    assert.equal(run('post-failure', stagedEv, t.root).stdout, '');
-  } finally { t.done(); }
-});
-
 test('hooks.json wires abs-hook on the native file tools and keeps the MCP hooks', () => {
   const h = JSON.parse(readFileSync(hooksFile, 'utf8')).hooks;
   const find = (event, matcher) => h[event].find((e) => e.matcher === matcher);
   for (const [event, matcher, arg] of [
     ['PreToolUse', 'Read|Write|Edit|Bash', 'pre'],
     ['PostToolUse', 'Read|Write|Edit|Bash', 'post'],
-    ['PostToolUseFailure', 'Write|Edit', 'post-failure'],
   ]) {
     const e = find(event, matcher);
     assert.ok(e, `${event} ${matcher}`);

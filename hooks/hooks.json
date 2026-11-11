@@ -54,16 +54,6 @@
             "timeout": 120
           }
         ]
-      },
-      {
-        "matcher": "Write|Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/piper/bin/abs-hook.js\" post-failure",
-            "timeout": 10
-          }
-        ]
       }
     ],
     "SessionStart": [
