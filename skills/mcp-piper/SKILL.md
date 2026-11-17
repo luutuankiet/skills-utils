@@ -1,6 +1,6 @@
 ---
 name: mcp-piper
-description: Send a file on disk as an MCP tool argument, or save an MCP tool's result to disk, without the bytes entering your context. Use before passing a large file (a script, a document, an image) to any MCP tool, and before calling an MCP tool whose result is large or binary (a full document read, a rendered image, an export), and when asked to move a GitHub PR body or comment into a Google Doc for a human to edit and post back.
+description: Send a file on disk as an MCP tool argument, or save an MCP tool's result to disk, without the bytes entering your context. Use before passing a large file (a script, a document, an image) to any MCP tool, and before calling an MCP tool whose result is large or binary (a full document read, a rendered image, an export), when one call should fetch its own input or act on its own result with a script or inline bash (`_pipe`), and when asked to move a GitHub PR body or comment into a Google Doc for a human to edit and post back.
 ---
 
 # mcp-piper
@@ -127,11 +127,36 @@ mcp-piper: saved 2 files
 Then work from the file with your normal tools (`Read` with a line range, `grep`,
 `jq`) instead of reading it whole.
 
-## GitHub block ↔ Google Doc
+## Around the call: `_pipe`
 
-To let a human edit a GitHub PR body or comment in a Google Doc and post it back
-as them, images and image sizes included, follow
-[gh-docs-bridge.md](gh-docs-bridge.md).
+`"_pipe"` runs code just before the call and just after it, so one call can
+fetch its own input or act on its own result. Any MCP tool takes it.
+
+```json
+"_pipe": "<snippet> <args>"
+"_pipe": {"pre": "<bash>", "post": "<bash>"}
+```
+
+- **pre** reads `{"tool", "input"}` on stdin. Whatever JSON object it prints
+  is merged into the arguments. Pointers and `_save_to` in that object then
+  work as usual. If it exits non-zero, the call is stopped with its error output.
+- **post** reads `{"tool", "input", "result", "saved"}`. `saved` lists the
+  files written by `_save_to`, or is `null`. Whatever text it prints replaces
+  the result you see. If it fails, the result is kept and the error is added.
+- `PIPER_STAGE` is `pre` or `post`, and `PIPER_TOOL` is the tool's full name.
+  The code runs in your working folder, with 110 s per stage.
+- A snippet is an executable file, found by name, or by name plus any
+  extension. The folders are searched in this order:
+  1. `.mcp-piper/pipes/`, in the working folder or any folder above it
+  2. `~/.config/mcp-piper/pipes/`
+  3. `pipes/` beside this file
+  An absolute path also works.
+- When no snippet fits, use inline bash. Save it as a snippet once it repeats.
+- `pre` runs before the user's permission prompt, so it should only read and
+  prepare. Anything that publishes belongs in `post`.
+
+Shipped snippet: `gh-doc` lets a human edit a GitHub PR body or comment in a
+Google Doc, and posts it back as them. See [gh-docs-bridge.md](gh-docs-bridge.md).
 
 ## When a call is stopped
 
