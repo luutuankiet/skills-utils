@@ -10,8 +10,16 @@ comment, or the GitHub URL of either.
 
 1. **Fork.** `create_doc` with a `title` and `"_pipe": "gh-doc <block>"`. The
    snippet fetches the block, downloads its images and fills `markdown` and
-   `images`. Then `doc_history` with `doc: <doc id>`,
-   `command: "tag forked"`. Send the human the Doc link.
+   `images`. Code blocks arrive at 5 pt, too small to read, so set them to
+   the body size with `run_doc_script`, `dry_run: false`:
+
+   ```js
+   doc.tabs.forEach(t => t.lines.forEach(l => l.runs.forEach(r => {
+     if (r.text.trim() && r.style.size < 12) style(r, {size: 12}, {includeCode: true}) })))
+   ```
+
+   Then `doc_history` with `doc: <doc id>`, `command: "tag forked"`. Send the
+   human the Doc link.
 2. **Read the human's changes.** `doc_history` with
    `command: "diff --stat forked..HEAD"`, then `diff -p` only if you need it.
 3. **Post on go.** `pull_doc` with `doc: <doc id>` and
