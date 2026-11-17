@@ -1,6 +1,6 @@
 ---
 name: mcp-piper
-description: Send a file on disk as an MCP tool argument, or save an MCP tool's result to disk, without the bytes entering your context. Use before passing a large file (a script, a document, an image) to any MCP tool, and before calling an MCP tool whose result is large or binary (a full document read, a rendered image, an export).
+description: Send a file on disk as an MCP tool argument, or save an MCP tool's result to disk, without the bytes entering your context. Use before passing a large file (a script, a document, an image) to any MCP tool, and before calling an MCP tool whose result is large or binary (a full document read, a rendered image, an export), and when asked to move a GitHub PR body or comment into a Google Doc for a human to edit and post back.
 ---
 
 # mcp-piper
@@ -126,6 +126,12 @@ mcp-piper: saved 2 files
 
 Then work from the file with your normal tools (`Read` with a line range, `grep`,
 `jq`) instead of reading it whole.
+
+## GitHub block ↔ Google Doc
+
+To let a human edit a GitHub PR body or comment in a Google Doc and post it back
+as them, images and image sizes included, follow
+[gh-docs-bridge.md](gh-docs-bridge.md).
 
 ## When a call is stopped
 
