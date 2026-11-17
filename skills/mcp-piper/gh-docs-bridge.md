@@ -18,7 +18,7 @@ repository, `N` the issue or PR number, and `ID` a comment id.
 3. Create the Doc with the Google Docs MCP server (google-docs-mcp):
    `create_doc` with `markdown="@file:<dir>/doc.md"` and `images` holding each
    entry of `images.json` as `{name: "@file64:<path>"}`. Mark the start with
-   `doc_history` and `command: "tag forked"`. Send the human the Doc link.
+   `doc_history` with `doc: <doc id>` and `command: "tag forked"`. Send the human the Doc link.
 4. Wait for the human's go or no-go.
 5. On go, `pull_doc` with `deliver="files"` and `"_save_to": "<dir>/wc/"`, then
    `gh-doc-back.py <dir>/wc/<tab>.gdoc.md <dir>/hashes.txt back.md --upload O/R`.
@@ -32,5 +32,5 @@ repository, `N` the issue or PR number, and `ID` a comment id.
    - new comment: `gh api -X POST repos/O/R/issues/N/comments -F body=@back.md`
 
 To see what the human changed without reading the whole Doc, call `doc_history`
-with `command: "diff forked..HEAD"`. A table alignment row such as `:----`
+with `command: "diff --stat forked..HEAD"` first, then `diff -p` only if needed. A table alignment row such as `:----`
 comes back as `---`; GitHub renders both the same.
