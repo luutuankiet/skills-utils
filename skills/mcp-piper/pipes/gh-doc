@@ -47,7 +47,10 @@ def gh(*args, accept=None):
 def py(script, *args):
     res = subprocess.run([sys.executable, '-I', os.path.join(SCRIPTS, script), *args], capture_output=True, text=True)
     if res.returncode:
-        fail(f'{script} failed: {(res.stderr or res.stdout).strip()}')
+        msg = (res.stderr or res.stdout).strip()
+        if msg.startswith('gh-doc: '):
+            sys.exit(msg)
+        fail(f'{script} failed: {msg}')
     return res.stdout
 
 

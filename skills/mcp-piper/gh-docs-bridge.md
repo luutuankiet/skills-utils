@@ -12,6 +12,8 @@ to GitHub markdown:
 - an unchanged image gets its original link back;
 - a new image is uploaded to GitHub (needs gh 2.99.0 or newer);
 - every image takes its width from its size in the Doc;
+- the Mermaid reading copy `pull_doc` adds under each excalidraw.com link is
+  removed; if any part of one is left, nothing is posted;
 - a table alignment row such as `:----` comes back as `---`; GitHub renders
   both the same.
 
