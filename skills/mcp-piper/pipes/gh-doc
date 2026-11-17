@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """mcp-piper snippet: edit one GitHub block in a Google Doc, then post it back.
 
-  "_pipe": "gh-doc <block>"   on create_doc: fills markdown and images
+  "_pipe": "gh-doc <block>"   on create_doc: fills markdown and images, and
+                              tags the new state "forked" unless a tag is given
                               on pull_doc:   pulls the Doc and posts it to GitHub
 
 <block> is OWNER/REPO#N (a PR or issue body), OWNER/REPO#issuecomment-ID (one
@@ -50,7 +51,7 @@ def py(script, *args):
     return res.stdout
 
 
-def fork(api, work):
+def fork(api, work, given):
     # One call returns the markdown, the HTML with signed image links (valid
     # for about 5 minutes) and the time stamp the post-back checks against.
     block = gh(api, accept='application/vnd.github.full+json')
@@ -63,6 +64,8 @@ def fork(api, work):
     with open(os.path.join(work, 'state.json'), 'w') as f:
         json.dump({'api': api, 'updated_at': block['updated_at'], 'url': block['html_url']}, f)
     out = {'markdown': '@file:' + os.path.join(work, 'doc.md')}
+    if not given.get('tag'):
+        out['tag'] = 'forked'
     if images:
         out['images'] = {name: '@file64:' + path for name, path in images.items()}
     return out
@@ -92,12 +95,12 @@ def post(api, repo, work):
 def main():
     if len(sys.argv) != 2:
         fail(__doc__)
-    sys.stdin.read()
+    given = json.loads(sys.stdin.read() or '{}').get('input') or {}
     api, repo, key = parse(sys.argv[1])
     work = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'mcp-piper', 'gh-doc', key)
     stage, tool = os.environ.get('PIPER_STAGE'), os.environ.get('PIPER_TOOL', '')
     if stage == 'pre' and tool.endswith('create_doc'):
-        print(json.dumps(fork(api, work)))
+        print(json.dumps(fork(api, work, given)))
     elif stage == 'pre' and tool.endswith('pull_doc'):
         shutil.rmtree(os.path.join(work, 'wc'), ignore_errors=True)
         print(json.dumps({'deliver': 'files', '_save_to': os.path.join(work, 'wc') + '/'}))

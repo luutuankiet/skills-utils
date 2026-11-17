@@ -1,6 +1,6 @@
 ---
 name: mcp-piper
-description: Send a file on disk as an MCP tool argument, or save an MCP tool's result to disk, without the bytes entering your context. Use before passing a large file (a script, a document, an image) to any MCP tool, and before calling an MCP tool whose result is large or binary (a full document read, a rendered image, an export), when one call should fetch its own input or act on its own result with a script or inline bash (`_pipe`), and when asked to move a GitHub PR body or comment into a Google Doc for a human to edit and post back.
+description: Send a file on disk as an MCP tool argument, or save an MCP tool's result to disk, without the bytes entering your context. Use before passing a large file (a script, a document, an image) to any MCP tool, before calling an MCP tool whose result is large or binary, when one call should fetch its own input or act on its own result (`_pipe`), and when asked to copy a GitHub PR body or comment into a Google Doc: one `create_doc` call with the `gh-doc` snippet copies it, no subagent needed.
 ---
 
 # mcp-piper
@@ -155,8 +155,26 @@ fetch its own input or act on its own result. Any MCP tool takes it.
 - `pre` runs before the user's permission prompt, so it should only read and
   prepare. Anything that publishes belongs in `post`.
 
-Shipped snippet: `gh-doc` lets a human edit a GitHub PR body or comment in a
-Google Doc, and posts it back as them. See [gh-docs-bridge.md](gh-docs-bridge.md).
+## GitHub block to Google Doc: `gh-doc`
+
+A human edits one GitHub block (a PR or issue body, or one comment) in a Google
+Doc, and you post it back as them. `<block>` is `OWNER/REPO#N`,
+`OWNER/REPO#issuecomment-ID`, or the GitHub URL of either. Each step is one
+call you make yourself.
+
+1. **Copy to Doc.** `create_doc` with a `title` and `"_pipe": "gh-doc <block>"`.
+   The snippet fetches the block and its images itself; do not fetch them first.
+   It fills `markdown` and `images` and tags the new state `forked`. Send the
+   human the Doc link.
+2. **Read changes.** When they say go: `doc_history` with `doc: <doc id>`,
+   `command: "diff --stat forked..HEAD"`; `diff -p` only if you need the text.
+3. **Post.** `pull_doc` with `doc: <doc id>` and `"_pipe": "gh-doc <block>"`.
+   The result is the posted URL. If the block changed on GitHub after step 1,
+   nothing is posted and the reason says so.
+
+To post a new comment, for a Doc with more than one tab, or without the
+snippet, and for how images and tables come back, see
+[gh-docs-bridge.md](gh-docs-bridge.md).
 
 ## When a call is stopped
 
