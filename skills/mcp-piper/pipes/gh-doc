@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""mcp-piper snippet: edit one GitHub block in a Google Doc, then post it back.
+
+  "_pipe": "gh-doc <block>"   on create_doc: fills markdown and images
+                              on pull_doc:   pulls the Doc and posts it to GitHub
+
+<block> is OWNER/REPO#N (a PR or issue body), OWNER/REPO#issuecomment-ID (one
+comment), or the GitHub URL of either. The post is refused when the block
+changed on GitHub after the fork. Work files live in
+~/.cache/mcp-piper/gh-doc/<block>/.
+"""
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+SCRIPTS = os.path.join(HERE, '..', 'scripts')
+
+
+def fail(msg):
+    sys.exit(f'gh-doc: {msg}')
+
+
+def parse(block):
+    m = re.match(r'^(?:https://github\.com/)?([\w.-]+)/([\w.-]+)(?:/(?:pull|issues)/|#)(\d+)?(?:#?issue-\d+)?(?:#?issuecomment-(\d+))?/?$', block)
+    if not m or not (m.group(3) or m.group(4)):
+        fail(f'cannot read "{block}"; write OWNER/REPO#N or OWNER/REPO#issuecomment-ID')
+    o, r, n, c = m.groups()
+    if c:
+        return f'repos/{o}/{r}/issues/comments/{c}', f'{o}/{r}', f'{o}__{r}__c{c}'
+    return f'repos/{o}/{r}/issues/{n}', f'{o}/{r}', f'{o}__{r}__{n}'
+
+
+def gh(*args, accept=None):
+    cmd = ['gh', 'api', *([ '-H', f'Accept: {accept}'] if accept else []), *args]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode:
+        fail(f'{" ".join(cmd)} failed: {res.stderr.strip()}')
+    return json.loads(res.stdout)
+
+
+def py(script, *args):
+    res = subprocess.run([sys.executable, '-I', os.path.join(SCRIPTS, script), *args], capture_output=True, text=True)
+    if res.returncode:
+        fail(f'{script} failed: {(res.stderr or res.stdout).strip()}')
+    return res.stdout
+
+
+def fork(api, work):
+    # One call returns the markdown, the HTML with signed image links (valid
+    # for about 5 minutes) and the time stamp the post-back checks against.
+    block = gh(api, accept='application/vnd.github.full+json')
+    shutil.rmtree(work, ignore_errors=True)
+    os.makedirs(work)
+    for name, text in (('body.md', block.get('body') or ''), ('body.html', block.get('body_html') or '')):
+        with open(os.path.join(work, name), 'w', encoding='utf-8') as f:
+            f.write(text)
+    images = json.loads(py('gh-doc-fork.py', os.path.join(work, 'body.md'), os.path.join(work, 'body.html'), work))
+    with open(os.path.join(work, 'state.json'), 'w') as f:
+        json.dump({'api': api, 'updated_at': block['updated_at'], 'url': block['html_url']}, f)
+    out = {'markdown': '@file:' + os.path.join(work, 'doc.md')}
+    if images:
+        out['images'] = {name: '@file64:' + path for name, path in images.items()}
+    return out
+
+
+def post(api, repo, work):
+    try:
+        state = json.load(open(os.path.join(work, 'state.json')))
+    except FileNotFoundError:
+        fail(f'no fork of this block in {work}; fork it with create_doc first')
+    now = gh(api)['updated_at']
+    if now != state['updated_at']:
+        fail(f'nothing posted: the block changed on GitHub at {now}, after the fork ({state["updated_at"]}). '
+             f'Merge that change into the Doc by hand, or fork again (this replaces the Doc text).')
+    tabs = sorted(glob.glob(os.path.join(work, 'wc', '*.gdoc.md')))
+    if len(tabs) != 1:
+        fail(f'expected one tab file in {work}/wc, found {len(tabs)}; this snippet handles one-tab Docs')
+    back = os.path.join(work, 'back.md')
+    py('gh-doc-back.py', tabs[0], os.path.join(work, 'hashes.txt'), back, '--upload', repo)
+    done = gh('-X', 'PATCH', api, '-F', f'body=@{back}')
+    state['updated_at'] = done['updated_at']
+    with open(os.path.join(work, 'state.json'), 'w') as f:
+        json.dump(state, f)
+    return f'gh-doc: posted {done["html_url"]} ({os.path.getsize(back)} bytes, from {back})'
+
+
+def main():
+    if len(sys.argv) != 2:
+        fail(__doc__)
+    sys.stdin.read()
+    api, repo, key = parse(sys.argv[1])
+    work = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'mcp-piper', 'gh-doc', key)
+    stage, tool = os.environ.get('PIPER_STAGE'), os.environ.get('PIPER_TOOL', '')
+    if stage == 'pre' and tool.endswith('create_doc'):
+        print(json.dumps(fork(api, work)))
+    elif stage == 'pre' and tool.endswith('pull_doc'):
+        shutil.rmtree(os.path.join(work, 'wc'), ignore_errors=True)
+        print(json.dumps({'deliver': 'files', '_save_to': os.path.join(work, 'wc') + '/'}))
+    elif stage == 'post' and tool.endswith('pull_doc'):
+        print(post(api, repo, work))
+
+
+if __name__ == '__main__':
+    main()

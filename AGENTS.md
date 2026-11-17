@@ -30,6 +30,8 @@ cli/lib/peek.sh             the peeking itself
 cli/lib/modes.js            target detection, clone cache
 piper/bin/mcp-piper.js      hook <event>, doctor
 piper/lib/core.js           pointer expansion, result saving
+piper/lib/pipe.js           _pipe: snippets and inline bash around a call
+skills/mcp-piper/pipes/     snippets shipped with the plugin (gh-doc)
 piper/lib/claude.js         Claude Code hook adapter
 piper/test/lab/             nested real sessions, cost model calls
 .github/workflows/release.yml  npm publish on vX.Y.Z / piper-vX.Y.Z

@@ -11,6 +11,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { mermaidEnabled, processBatch } from './mermaid.js';
 import { absHint, stagingRoot } from './abs.js';
 import { inLinkedWorktree } from './worktree.js';
+import { PIPE_KEY, parsePipe, runPre, runPost } from './pipe.js';
 
 // ---------------------------------------------------------------- settings ---
 // Three behaviours, each settled by nested Claude Code runs (version 2.1.318).
@@ -49,7 +50,7 @@ const DEFAULTS = {
   saveErrors: SAVE_ERROR_RESULTS,
 };
 
-export const MEMORY_NOTE = 'mcp-piper is active for MCP tools. To send a file on disk as a tool argument, write the argument as "@file:<abs path>" (text) or "@file64:<abs path>" (base64); "@dir:<abs path>" / "@dir64:<abs path>" send a folder as a {"relative/path": contents} map. The bytes are read for you and never enter your context. To save a tool\'s result to disk instead of reading it, add "_save_to": "<abs path>" to the call (end it in "/" to save into a folder); you get back a short stub with the paths. Never write or read base64 yourself when a pointer or _save_to can carry it. Details: the mcp-piper skill.';
+export const MEMORY_NOTE = 'mcp-piper is active for MCP tools. To send a file on disk as a tool argument, write the argument as "@file:<abs path>" (text) or "@file64:<abs path>" (base64); "@dir:<abs path>" / "@dir64:<abs path>" send a folder as a {"relative/path": contents} map. The bytes are read for you and never enter your context. To save a tool\'s result to disk instead of reading it, add "_save_to": "<abs path>" to the call (end it in "/" to save into a folder); you get back a short stub with the paths. "_pipe": "<snippet> <args>" or {"pre": "<bash>", "post": "<bash>"} runs code before the call (its JSON output becomes arguments) and after it (its text output replaces the result). Never write or read base64 yourself when a pointer or _save_to can carry it. Details: the mcp-piper skill.';
 
 // ------------------------------------------------------------------ helpers ---
 
@@ -67,7 +68,8 @@ export function deny(reason) {
 export function involvesPiper(ev) {
   const input = ev && ev.tool_input;
   if (!input || typeof input !== 'object') return false;
-  return Object.prototype.hasOwnProperty.call(input, '_save_to') || hasPointerCandidates(input);
+  const has = (k) => Object.prototype.hasOwnProperty.call(input, k);
+  return has('_save_to') || has(PIPE_KEY) || hasPointerCandidates(input);
 }
 
 /** Does a PostToolUse tool_response look like a tool error? */
@@ -113,6 +115,7 @@ function describe(prep) {
   }
   if (prep.escapes) parts.push(`${prep.escapes} escaped "@@file" value${prep.escapes === 1 ? '' : 's'} sent literally`);
   if (prep.saveTo) parts.push(`result will be saved to ${prep.saveTo}`);
+  if (prep.pipe) parts.push(`_pipe ${prep.pipe} ran`);
   return `mcp-piper: ${parts.join('; ')}`;
 }
 
@@ -134,22 +137,48 @@ export function pre(ev, options = {}) {
     return null;
   }
 
+  // `_pipe` first: its pre step may add arguments, pointers and `_save_to`.
+  let work = input;
+  let plan = null;
+  if (Object.prototype.hasOwnProperty.call(input, PIPE_KEY)) {
+    try {
+      plan = parsePipe(input[PIPE_KEY], ev.cwd);
+      work = { ...input };
+      delete work[PIPE_KEY];
+      const added = runPre(plan, work, ev);
+      if (added) work = { ...work, ...added };
+    } catch (err) {
+      if (err instanceof PiperError) return deny(err.message);
+      throw err;
+    }
+  }
+
   let prep;
   try {
-    prep = prepareInput(input, { cwd: ev.cwd || process.cwd() });
+    prep = prepareInput(work, { cwd: ev.cwd || process.cwd() });
   } catch (err) {
     if (err instanceof PiperError) return deny(err.message);
     throw err;
   }
+  if (plan) {
+    prep.changed = true;
+    prep.pipe = plan.label;
+  }
+  const pipePost = plan && plan.post;
 
-  // Never nudge on a call whose input came from a pointer.
-  const nudge = !prep.expanded && needsInlineNudge(prep.input);
+  // Never nudge on a call whose input came from a pointer or a pipe.
+  const nudge = !prep.expanded && !plan && needsInlineNudge(prep.input);
 
-  if (prep.saveTo || (nudge && o.nudgeRoute === 'post')) {
+  if (prep.saveTo || pipePost || (nudge && o.nudgeRoute === 'post')) {
     if (!id) {
-      if (prep.saveTo) return deny('mcp-piper: cannot honour _save_to because Claude Code gave this call no tool_use_id. Call again without _save_to.');
+      if (prep.saveTo || pipePost) return deny(`mcp-piper: cannot honour ${prep.saveTo ? '_save_to' : '_pipe'} because Claude Code gave this call no tool_use_id. Call again without it.`);
     } else {
-      writeState(id, { saveTo: prep.saveTo, expanded: prep.expanded, nudge: nudge && o.nudgeRoute === 'post' });
+      const pipeInput = { ...work };
+      delete pipeInput._save_to;
+      writeState(id, {
+        saveTo: prep.saveTo, expanded: prep.expanded, nudge: nudge && o.nudgeRoute === 'post',
+        ...(pipePost ? { pipe: pipePost, pipeInput } : {}),
+      });
     }
   }
 
@@ -173,32 +202,35 @@ export function post(ev, options = {}) {
   try {
     const resp = ev.tool_response;
     if (!o.saveErrors && isErrorResult(resp)) return null;
-    const extra = state.nudge ? { additionalContext: NUDGE_TEXT } : {};
-    if (!state.saveTo) {
-      return state.nudge ? { hookSpecificOutput: { hookEventName: 'PostToolUse', ...extra } } : null;
+    const notes = state.nudge ? [NUDGE_TEXT] : [];
+    let saved = null;
+    let text = null;
+    if (state.saveTo) {
+      try {
+        saved = saveResult(normaliseResult(resp), state.saveTo, { trusted: toolResultsFolders(ev), server: serverMatcher(ev) });
+        text = buildStub(saved);
+      } catch (err) {
+        // Better the agent reads the result than loses it. A PiperError (a
+        // refused resource path) already says what happened and what to do.
+        notes.push(err instanceof PiperError
+          ? err.message
+          : `mcp-piper: could not save the result to ${state.saveTo} (${err.code || err.message}), so it is shown in full instead.`);
+      }
     }
-    let saved;
-    try {
-      saved = saveResult(normaliseResult(resp), state.saveTo, { trusted: toolResultsFolders(ev), server: serverMatcher(ev) });
-    } catch (err) {
-      // Better the agent reads the result than loses it. A PiperError (a
-      // refused resource path) already says what happened and what to do.
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PostToolUse',
-          additionalContext: err instanceof PiperError
-            ? err.message
-            : `mcp-piper: could not save the result to ${state.saveTo} (${err.code || err.message}), so it is shown in full instead.`,
-        },
-      };
+    if (state.pipe) {
+      try {
+        const payload = { tool: ev.tool_name, input: state.pipeInput, result: resp, saved: saved ? saved.files.map((f) => f.path) : null };
+        const out = runPost(state.pipe, payload, ev);
+        if (out !== null) text = out;
+      } catch (err) {
+        notes.push(err instanceof PiperError ? err.message : `mcp-piper: _pipe post step failed: ${err.message}`);
+      }
     }
-    return {
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        updatedToolOutput: [{ type: 'text', text: buildStub(saved) }],
-        ...extra,
-      },
-    };
+    if (text === null && !notes.length) return null;
+    const out = { hookEventName: 'PostToolUse' };
+    if (text !== null) out.updatedToolOutput = [{ type: 'text', text }];
+    if (notes.length) out.additionalContext = notes.join('\n');
+    return { hookSpecificOutput: out };
   } finally {
     deleteState(id);
   }

@@ -1,36 +1,44 @@
 # GitHub block ↔ Google Doc
 
 A human edits one GitHub block (a PR or issue body, or one comment) in a Google
-Doc, and you post it back with `gh` as them, images included. The human reviews
-the Doc and only the Doc; you post when they say go. The scripts sit in
-`scripts/` beside this file; run them with `python3 -I`. Below, `O/R` is the
-repository, `N` the issue or PR number, and `ID` a comment id.
+Doc, and you post it back with `gh` as them, images included. The human works in
+the Doc only. When they say go, read their changes and post. Do not ask them
+to review again.
 
-1. Fetch the block into a work folder. For a comment, use
-   `repos/O/R/issues/comments/ID` in both calls. The HTML links to the images
-   are signed for 5 minutes, so run step 2 straight after.
-   ```
-   gh api repos/O/R/issues/N --jq .body > body.md
-   gh api -H "Accept: application/vnd.github.html+json" repos/O/R/issues/N --jq .body_html > body.html
-   ```
-2. `gh-doc-fork.py body.md body.html <dir>` writes `doc.md` (each image
-   becomes `![name](attach:name)`), `images.json` and `hashes.txt`.
-3. Create the Doc with the Google Docs MCP server (google-docs-mcp):
-   `create_doc` with `markdown="@file:<dir>/doc.md"` and `images` holding each
-   entry of `images.json` as `{name: "@file64:<path>"}`. Mark the start with
-   `doc_history` with `doc: <doc id>` and `command: "tag forked"`. Send the human the Doc link.
-4. Wait for the human's go or no-go.
-5. On go, `pull_doc` with `deliver="files"` and `"_save_to": "<dir>/wc/"`, then
-   `gh-doc-back.py <dir>/wc/<tab>.gdoc.md <dir>/hashes.txt back.md --upload O/R`.
-   An unchanged image gets its original tag back; a new one is uploaded to
-   GitHub (gh 2.99.0 or newer). Every image takes its width from its size in
-   the Doc, so the human resizes images in the Doc, not in an `<img>` tag. Without `--upload` new images become
-   `<NEW-IMAGE ...>` placeholders, which is a safe dry run.
-6. Post `back.md`:
-   - edit a body: `gh api -X PATCH repos/O/R/issues/N -F body=@back.md`
-   - edit a comment: `gh api -X PATCH repos/O/R/issues/comments/ID -F body=@back.md`
-   - new comment: `gh api -X POST repos/O/R/issues/N/comments -F body=@back.md`
+`<block>` is `OWNER/REPO#N` for a body, `OWNER/REPO#issuecomment-ID` for a
+comment, or the GitHub URL of either.
 
-To see what the human changed without reading the whole Doc, call `doc_history`
-with `command: "diff --stat forked..HEAD"` first, then `diff -p` only if needed. A table alignment row such as `:----`
-comes back as `---`; GitHub renders both the same.
+1. **Fork.** `create_doc` with a `title` and `"_pipe": "gh-doc <block>"`. The
+   snippet fetches the block, downloads its images and fills `markdown` and
+   `images`. Then `doc_history` with `doc: <doc id>`,
+   `command: "tag forked"`. Send the human the Doc link.
+2. **Read the human's changes.** `doc_history` with
+   `command: "diff --stat forked..HEAD"`, then `diff -p` only if you need it.
+3. **Post on go.** `pull_doc` with `doc: <doc id>` and
+   `"_pipe": "gh-doc <block>"`. The snippet pulls the Doc and converts it back
+   to GitHub markdown:
+   - an unchanged image gets its original link back;
+   - a new image is uploaded to GitHub (needs gh 2.99.0 or newer);
+   - every image takes its width from its size in the Doc.
+
+   Then it edits the block on GitHub, and the result is the posted URL. If the
+   block changed on GitHub after the fork, it posts nothing and says so.
+
+A table alignment row such as `:----` comes back as `---`; GitHub renders both
+the same. The snippet handles a Doc with one tab and edits an existing block.
+To post a new comment, or when the snippet is not available, run the scripts in
+`scripts/` by hand with `python3 -I`:
+
+```
+gh api repos/O/R/issues/N --jq .body > body.md
+gh api -H "Accept: application/vnd.github.html+json" repos/O/R/issues/N --jq .body_html > body.html
+gh-doc-fork.py body.md body.html <dir>      # image links last 5 minutes: run at once
+create_doc markdown="@file:<dir>/doc.md" images={name: "@file64:<path>"}   # from images.json
+pull_doc deliver="files" _save_to="<dir>/wc/"
+gh-doc-back.py <dir>/wc/<tab>.gdoc.md <dir>/hashes.txt back.md --upload O/R
+gh api -X POST repos/O/R/issues/N/comments -F body=@back.md
+```
+
+For a comment, use `repos/O/R/issues/comments/ID` in the two fetch commands.
+To edit a block instead of adding a comment, post with `-X PATCH` to the
+block's own address.
