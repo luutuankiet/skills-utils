@@ -8,6 +8,9 @@ packages from the same tree:
 - **mcp-piper** (`piper/`, `@luutuankiet/mcp-piper`, skill `skills/mcp-piper/`,
   hooks `hooks/hooks.json`): hooks on every MCP tool call. `"@file:<path>"` sends
   a file as an argument; `"_save_to": "<path>"` saves the result to disk.
+  Its `gh-doc` snippet targets one Google Docs MCP server that is not public,
+  not the official one; what a port needs is in
+  `skills/mcp-piper/gh-docs-bridge.md`, "Porting to another Docs server".
 
 ## Hard constraints
 

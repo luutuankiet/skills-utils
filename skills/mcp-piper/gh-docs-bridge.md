@@ -42,3 +42,21 @@ gh api -X POST repos/O/R/issues/N/comments -F body=@back.md
 For a comment, use `repos/O/R/issues/comments/ID` in the two fetch commands.
 To edit a block instead of adding a comment, post with `-X PATCH` to the
 block's own address.
+
+## Porting to another Docs server
+
+`pipes/gh-doc` and its two scripts were built against one Google Docs MCP server
+that is not public. To use them with another server, such as the official
+Google Docs MCP, that server needs tools doing these jobs, or the snippet needs
+changes where it does not:
+
+| the snippet expects | where |
+|---|---|
+| a tool whose name ends in `create_doc`, taking `markdown` (GitHub markdown, with images written `![name](attach:name)`), `images` (`{name: base64}`) and `tag` | `fork()` in `pipes/gh-doc` |
+| a tool whose name ends in `pull_doc`, taking `deliver: "files"` and saving one `*.gdoc.md` file per tab into the `_save_to` folder | the `pull_doc` branches at the end of `pipes/gh-doc` |
+| that file: markdown with a marker on line 1, images as `![...](./images/<file> "<w>x<h>...")` beside the image files, `<` and `>` escaped with a backslash outside code fences | `scripts/gh-doc-back.py` |
+| a way to diff the Doc against the `forked` state, for step 2 | `doc_history`; optional, the post does not need it |
+
+The server-specific clean-ups are in `gh-doc-back.py`; its docstring lists
+each one. The Mermaid reading copy it removes is added only by that server, so
+on another server the removal finds nothing and costs nothing.

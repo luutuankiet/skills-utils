@@ -162,6 +162,12 @@ Doc, and you post it back as them. `<block>` is `OWNER/REPO#N`,
 `OWNER/REPO#issuecomment-ID`, or the GitHub URL of either. Each step is one
 call you make yourself.
 
+The snippet is written for one Google Docs MCP server that is not public: its
+`create_doc`, `doc_history` and `pull_doc` tools. The official Google Docs MCP
+has no `pull_doc`, so the snippet does not work there. To make it work with
+another server, see "Porting to another Docs server" in
+[gh-docs-bridge.md](gh-docs-bridge.md).
+
 1. **Copy to Doc.** `create_doc` with a `title` and `"_pipe": "gh-doc <block>"`.
    The snippet fetches the block and its images itself; do not fetch them first.
    It fills `markdown` and `images` and tags the new state `forked`. Send the
